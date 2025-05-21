@@ -5,5 +5,14 @@
         "command": "urq_to_plantuml",
         "context": [{ "key": "selector", "operator": "equal", "operand": "source.urql" }]
     },
- 
+     // создает на основе qst файла uml файл и png граф
+    // {
+    //     "keys": ["ctrl+alt+u"],
+    //     "command": "urq_to_plantuml",
+    //     "context": [{ "key": "selector", "operator": "equal", "args": {"generate_png": "net"}, "operand": "source.urql" }]
+    // },
+//  [
+//   { "keys": ["ctrl+shift+p"], "command": "urq_to_plantuml" },
+//   { "keys": ["ctrl+shift+n"], "command": "urq_to_plantuml_no_png" }
+// ]
 ]

@@ -1,13 +1,22 @@
 @startuml
 skinparam state {
-  BackgroundColor LightBlue
-  BorderColor Blue
-  FontName Arial
+  BackgroundColor #FFE4E1
+  BorderColor #8B4513
+  FontColor #800000
+  FontName Papyrus
+  BorderThickness 2
+  Stereotyping true
 }
 
-state "1\nВы пришли в лес" as 1
+skinparam arrow {
+  Color #8B4513
+  FontColor #800000
+  Thickness 1.5
+}
+
 state "2\nВы пришли к высокой горе" as 2
-state "Старт\nПример текста" as Старт
+state "Старт\nПример текст стартовой локации" as Старт
+state "1\nВы пришли в лес" as 1
 
 Старт --> 1 : "иди направо"
 Старт --> 2 : "иди налево"

@@ -1,0 +1,41 @@
+{
+  "default": "skinparam state {\n  BackgroundColor LightBlue\n  BorderColor Blue\n  FontName Arial\n}\n\n",
+  
+  "dark": "skinparam state {\n  BackgroundColor #333333\n  BorderColor #FFFFFF\n  FontColor #FFFFFF\n  FontName Arial\n  ArrowColor #FFFFFF\n}\n\nskinparam arrow {\n  Color #FFFFFF\n  FontColor #FFFFFF\n}\n\n",
+  
+  "pastel": "skinparam state {\n  BackgroundColor #FFEFD5\n  BorderColor #FFB6C1\n  FontColor #8B4513\n  FontName Comic Sans MS\n  FontStyle bold\n}\n\nskinparam arrow {\n  Color #FFB6C1\n  FontColor #8B4513\n}\n\n",
+  
+  "professional": "skinparam state {\n  BackgroundColor #F8F8F8\n  BorderColor #404040\n  FontColor #000000\n  FontName Times New Roman\n  FontStyle plain\n  Shadowing true\n}\n\nskinparam arrow {\n  Color #404040\n  FontColor #000000\n  Thickness 1.5\n}\n\n",
+  
+  "tech": "skinparam state {\n  BackgroundColor #E6F7FF\n  BorderColor #0078D7\n  FontColor #004C99\n  FontName Consolas\n  Shadowing false\n  BorderThickness 2\n}\n\nskinparam arrow {\n  Color #0078D7\n  FontColor #004C99\n  Thickness 1\n}\n\n",
+  
+  "fantasy": "skinparam state {\n  BackgroundColor #FFE4E1\n  BorderColor #8B4513\n  FontColor #800000\n  FontName Papyrus\n  BorderThickness 2\n  Stereotyping true\n}\n\nskinparam arrow {\n  Color #8B4513\n  FontColor #800000\n  Thickness 1.5\n}\n\n",
+  
+  "modern": "skinparam state {\n  BackgroundColor #FFFFFF\n  BorderColor #00BFFF\n  FontColor #2F4F4F\n  FontName Segoe UI\n  RoundCorner 15\n  BorderThickness 1\n  Shadowing false\n}\n\nskinparam arrow {\n  Color #00BFFF\n  FontColor #2F4F4F\n  Thickness 1\n}\n\n",
+  
+  "retro": "skinparam state {\n  BackgroundColor #FFD700\n  BorderColor #FF6347\n  FontColor #8A2BE2\n  FontName Courier New\n  BorderThickness 2\n}\n\nskinparam arrow {\n  Color #FF6347\n  FontColor #8A2BE2\n  Thickness 2\n}\n\n",
+  
+  "minimalist": "skinparam state {\n  BackgroundColor transparent\n  BorderColor #000000\n  FontColor #000000\n  FontName Arial\n  BorderThickness 0.5\n  Shadowing false\n}\n\nskinparam arrow {\n  Color #000000\n  FontColor #000000\n  Thickness 0.5\n}\n\n",
+  
+  "colorful": "skinparam state {\n  BackgroundColor<<start>> #ADFF2F\n  BackgroundColor<<main>> #00FFFF\n  BackgroundColor<<end>> #FFB6C1\n  BorderColor #4169E1\n  FontColor #000000\n  FontName Tahoma\n}\n\nskinparam arrow {\n  Color #4169E1\n  FontColor #000000\n}\n\n",
+  
+  "blueprint": "skinparam state {\n  BackgroundColor #F0F8FF\n  BorderColor #4682B4\n  FontColor #191970\n  FontName Verdana\n  BorderThickness 1\n  Shadowing true\n}\n\nskinparam arrow {\n  Color #4682B4\n  FontColor #191970\n  Thickness 1\n}\n\n",
+  
+  "neon": "skinparam state {\n  BackgroundColor #000000\n  BorderColor #FF00FF\n  FontColor #00FF00\n  FontName Impact\n  BorderThickness 2\n  Shadowing true\n}\n\nskinparam arrow {\n  Color #FF00FF\n  FontColor #00FF00\n  Thickness 1.5\n}\n\n",
+  
+  "nature": "skinparam state {\n  BackgroundColor #E0F8E0\n  BorderColor #228B22\n  FontColor #006400\n  FontName Georgia\n  BorderThickness 1\n  Shadowing false\n}\n\nskinparam arrow {\n  Color #228B22\n  FontColor #006400\n  Thickness 1\n}\n\n",
+  
+  "elegant": "skinparam state {\n  BackgroundColor #F5F5F5\n  BorderColor #2F4F4F\n  FontColor #2F4F4F\n  FontName Garamond\n  FontStyle italic\n  BorderThickness 1\n  Shadowing true\n}\n\nskinparam arrow {\n  Color #2F4F4F\n  FontColor #2F4F4F\n  Thickness 1\n}\n\n",
+  
+  "ocean": "skinparam state {\n  BackgroundColor #E0FFFF\n  BorderColor #1E90FF\n  FontColor #00008B\n  FontName Trebuchet MS\n  BorderThickness 1\n  Shadowing true\n}\n\nskinparam arrow {\n  Color #1E90FF\n  FontColor #00008B\n  Thickness 1\n}\n\n",
+  
+  "autumn": "skinparam state {\n  BackgroundColor #FFF8DC\n  BorderColor #B8860B\n  FontColor #8B4513\n  FontName Book Antiqua\n  BorderThickness 1\n  Shadowing false\n}\n\nskinparam arrow {\n  Color #B8860B\n  FontColor #8B4513\n  Thickness 1\n}\n\n",
+  
+  "monochrome": "skinparam state {\n  BackgroundColor White\n  BorderColor Black\n  FontColor Black\n  FontName Arial\n  BorderThickness 1\n  Shadowing false\n}\n\nskinparam arrow {\n  Color Black\n  FontColor Black\n  Thickness 1\n}\n\n",
+  
+  "cyberpunk": "skinparam state {\n  BackgroundColor #111111\n  BorderColor #FF00FF\n  FontColor #00FFFF\n  FontName Lucida Console\n  BorderThickness 2\n  Shadowing true\n}\n\nskinparam arrow {\n  Color #FF00FF\n  FontColor #00FFFF\n  Thickness 1.5\n}\n\n",
+  
+  "vintage": "skinparam state {\n  BackgroundColor #F5DEB3\n  BorderColor #A0522D\n  FontColor #8B4513\n  FontName Bookman Old Style\n  FontStyle italic\n  BorderThickness 1\n  Shadowing false\n}\n\nskinparam arrow {\n  Color #A0522D\n  FontColor #8B4513\n  Thickness 1\n}\n\n",
+  
+  "highcontrast": "skinparam state {\n  BackgroundColor White\n  BorderColor Black\n  FontColor Black\n  FontName Arial\n  FontSize 14\n  BorderThickness 2\n  Shadowing false\n}\n\nskinparam arrow {\n  Color Black\n  FontColor Black\n  FontSize 12\n  Thickness 2\n}\n\n"
+}

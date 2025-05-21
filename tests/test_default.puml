@@ -1,0 +1,13 @@
+@startuml
+skinparam state {
+  BackgroundColor LightBlue
+  BorderColor Blue
+  FontName Arial
+}
+state "2\nВы пришли к высокой горе" as 2
+state "Старт\nПример текста" as Старт
+state "1\nВы пришли в лес" as 1
+
+Старт --> 1 : "иди направо"
+Старт --> 2 : "иди налево"
+@enduml
