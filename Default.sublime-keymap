@@ -1,0 +1,9 @@
+[
+    // создает на основе qst файла uml файл и png граф
+    {
+        "keys": ["ctrl+alt+g"],
+        "command": "urq_to_plantuml",
+        "context": [{ "key": "selector", "operator": "equal", "operand": "source.urql" }]
+    },
+ 
+]
