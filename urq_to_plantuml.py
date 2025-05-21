@@ -2,11 +2,14 @@ import sublime
 import sublime_plugin
 import os
 import re
-import subprocess
-import platform
-import tempfile
+import urllib.request
+import urllib.error
 import base64
 import zlib
+import tempfile
+import platform
+import subprocess
+import time
 
 class UrqToPlantumlCommand(sublime_plugin.TextCommand):
     def run(self, edit):
@@ -16,24 +19,6 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         # Проверяем, что текущий файл - это qst файл
         if not current_file or not current_file.lower().endswith('.qst'):
             sublime.error_message("Текущий файл не является URQ (.qst) файлом")
-            return
-            
-        # Определяем путь к директории, где находится плагин
-        plugin_path = os.path.dirname(os.path.realpath(__file__))
-        
-        # Путь к plantuml.jar (должен быть в той же папке, что и плагин)
-        plantuml_jar = os.path.join(plugin_path, "plantuml.jar")
-        
-        # Проверяем, что plantuml.jar существует
-        if not os.path.exists(plantuml_jar):
-            sublime.error_message("Не найден файл plantuml.jar в " + plugin_path)
-            return
-        
-        # Определяем путь к Java
-        java_cmd = self._get_java_cmd()
-        
-        if not java_cmd:
-            sublime.error_message("Не удалось найти Java в системе")
             return
         
         # Показываем статус
@@ -49,80 +34,23 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             # Генерируем PlantUML код
             plantuml_code = self._generate_plantuml(locations, transitions, puml_file)
             
-            # Генерируем изображение
-            self._generate_diagram(puml_file, plantuml_jar, java_cmd)
+            # Создаем путь к выходному .png файлу
+            png_file = os.path.splitext(current_file)[0] + '.png'
             
-            # Открываем сгенерированный файл PlantUML в Sublime
-            self.view.window().open_file(puml_file)
+            # Генерируем изображение через онлайн-сервер
+            success = self._generate_diagram_server(plantuml_code, png_file)
             
-            # Показываем сообщение об успешной конвертации
-            self.view.window().status_message("Конвертация URQ в PlantUML завершена успешно")
-            
+            if success:
+                # Открываем сгенерированный файл PlantUML в Sublime
+                self.view.window().open_file(puml_file)
+                
+                # Показываем сообщение об успешной конвертации
+                self.view.window().status_message("Конвертация URQ в PlantUML завершена успешно")
+            else:
+                sublime.error_message("Ошибка при создании диаграммы. Проверьте подключение к интернету.")
+                
         except Exception as e:
             sublime.error_message("Произошла ошибка при конвертации: " + str(e))
-    
-    def _get_java_cmd(self):
-        """Определяет команду для запуска Java, используя PATH"""
-        system = platform.system()
-        
-        java_cmd = "java"
-        
-        # Проверяем команду из PATH
-        try:
-            startupinfo = None
-            if system == "Windows":
-                # На Windows скрываем окно консоли
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0  # SW_HIDE
-            
-            process = subprocess.Popen(
-                [java_cmd, "-version"], 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                startupinfo=startupinfo
-            )
-            stdout, stderr = process.communicate()
-            
-            # Java версия обычно выводится в stderr
-            if "version" in stderr or "version" in stdout:
-                return java_cmd
-        except:
-            pass
-        
-        # Проверка стандартных расположений для разных OS
-        if system == "Windows":
-            # Проверяем Java в Program Files
-            program_dirs = [
-                os.environ.get('PROGRAMFILES', 'C:\\Program Files'),
-                os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)')
-            ]
-            
-            for prog_dir in program_dirs:
-                if os.path.exists(prog_dir):
-                    java_path = os.path.join(prog_dir, 'Java')
-                    if os.path.exists(java_path):
-                        for item in os.listdir(java_path):
-                            if item.startswith('jdk') or item.startswith('jre'):
-                                bin_path = os.path.join(java_path, item, 'bin', 'java.exe')
-                                if os.path.exists(bin_path):
-                                    return bin_path
-        
-        elif system in ["Darwin", "Linux"]:
-            # Для macOS и Linux проверяем стандартные пути
-            java_paths = [
-                "/usr/bin/java",
-                "/usr/local/bin/java",
-                "/opt/homebrew/bin/java"  # для macOS с Homebrew
-            ]
-            
-            for path in java_paths:
-                if os.path.exists(path):
-                    return path
-        
-        # Если Java не найден, возвращаем None
-        return None
     
     def _parse_urq_file(self, file_path):
         """Парсит URQ файл и возвращает структуру локаций и переходов"""
@@ -208,70 +136,93 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         
         return plantuml_code
     
-    def _generate_diagram(self, plantuml_file, plantuml_jar, java_cmd, method="jar"):
-        """Генерирует изображение на основе PlantUML кода"""
-        try:
-            # Определяем выходной файл изображения
-            output_image = os.path.splitext(plantuml_file)[0] + ".png"
-            
-            if method == "jar":
-                # Используем локальный JAR-файл
-                startupinfo = None
-                if platform.system() == "Windows":
-                    # На Windows скрываем окно консоли
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    startupinfo.wShowWindow = 0  # SW_HIDE
-                
-                cmd = [java_cmd, "-jar", plantuml_jar, plantuml_file]
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True,
-                    startupinfo=startupinfo
-                )
-                stdout, stderr = process.communicate()
-                
-                if process.returncode != 0:
-                    raise Exception("Ошибка при выполнении PlantUML: " + stderr)
-            
-            elif method == "server":
-                # Загружаем PlantUML код из файла
-                with open(plantuml_file, 'r', encoding='utf-8') as f:
-                    plantuml_code = f.read()
-                
-                # Используем онлайн-сервер
-                encoded = self._encode_for_plantuml_server(plantuml_code)
-                url = "http://www.plantuml.com/plantuml/png/{0}".format(encoded)
-                
-                # Используем urllib для HTTP запроса
-                try:
-                    import urllib.request
-                    response = urllib.request.urlopen(url)
-                    if response.getcode() == 200:
-                        with open(output_image, 'wb') as f:
-                            f.write(response.read())
-                    else:
-                        raise Exception("Ошибка сервера: {0}".format(response.getcode()))
-                except ImportError:
-                    # Для Python 2.x
-                    import urllib2
-                    response = urllib2.urlopen(url)
-                    if response.getcode() == 200:
-                        with open(output_image, 'wb') as f:
-                            f.write(response.read())
-                    else:
-                        raise Exception("Ошибка сервера: {0}".format(response.getcode()))
-            
-            return True
-        
-        except Exception as e:
-            sublime.error_message("Ошибка при генерации диаграммы: " + str(e))
-            return False
-    
     def _encode_for_plantuml_server(self, plantuml_text):
         """Кодирует PlantUML текст для использования с онлайн-сервером"""
         compressed = zlib.compress(plantuml_text.encode('utf-8'))
         b64 = base64.b64encode(compressed)
         return b64.decode('utf-8')
+    
+    def _generate_diagram_server(self, plantuml_code, output_image):
+        """Генерирует изображение через онлайн-сервер PlantUML"""
+        try:
+            # Используем онлайн-сервер
+            encoded = self._encode_for_plantuml_server(plantuml_code)
+            url = "http://www.plantuml.com/plantuml/png/{0}".format(encoded)
+            
+            # Добавляем заголовок User-Agent для предотвращения блокировки
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sublime Text Plugin'}
+            
+            # Создаем запрос с заголовками
+            req = urllib.request.Request(url, headers=headers)
+            
+            # Загружаем изображение
+            with urllib.request.urlopen(req, timeout=30) as response:
+                if response.getcode() == 200:
+                    # Сохраняем изображение
+                    with open(output_image, 'wb') as f:
+                        f.write(response.read())
+                    return True
+                else:
+                    return False
+        except Exception as e:
+            sublime.error_message("Ошибка при загрузке с сервера PlantUML: " + str(e))
+            return False
+    
+    def _open_image(self, image_path):
+        """Открывает изображение в системном просмотрщике"""
+        try:
+            # Определяем команду для открытия изображения в зависимости от ОС
+            system = platform.system()
+            
+            if system == "Windows":
+                os.startfile(image_path)
+            elif system == "Darwin":  # macOS
+                subprocess.Popen(["open", image_path])
+            else:  # Linux и другие Unix-подобные системы
+                subprocess.Popen(["xdg-open", image_path])
+                
+            return True
+        except Exception as e:
+            sublime.error_message("Не удалось открыть изображение: " + str(e))
+            return False
+
+# Альтернативный метод для использования с библиотекой requests,
+# если она доступна (для более стабильной работы с HTTP)
+class UrqToPlantumlRequestsCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        # Проверяем наличие библиотеки requests
+        try:
+            import requests
+            self._use_requests = True
+        except ImportError:
+            self._use_requests = False
+            sublime.error_message("Библиотека requests не установлена. Будет использован стандартный метод.")
+            
+        # Вызываем стандартный метод
+        self.view.run_command('urq_to_plantuml')
+
+    def _generate_diagram_server_with_requests(self, plantuml_code, output_image):
+        """Генерирует изображение через онлайн-сервер PlantUML с использованием библиотеки requests"""
+        try:
+            import requests
+            
+            # Используем онлайн-сервер
+            encoded = self._encode_for_plantuml_server(plantuml_code)
+            url = "http://www.plantuml.com/plantuml/png/~{0}".format(encoded)
+            
+            # Добавляем заголовок User-Agent для предотвращения блокировки
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sublime Text Plugin'}
+            
+            # Выполняем запрос
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                # Сохраняем изображение
+                with open(output_image, 'wb') as f:
+                    f.write(response.content)
+                return True
+            else:
+                return False
+        except Exception as e:
+            sublime.error_message("Ошибка при загрузке с сервера PlantUML: " + str(e))
+            return False
