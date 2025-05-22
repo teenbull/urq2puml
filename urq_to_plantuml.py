@@ -13,7 +13,7 @@ BTN_LIMIT = 30
 
 import sublime
 import sublime_plugin
-import os
+import os, sys
 import re
 import subprocess
 import string
@@ -157,9 +157,15 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                     
                     if svg_success:
                         status_parts.append(".svg файл создан" + (" онлайн" if net else ""))
+                        
+                        # Показываем диалог для открытия SVG файла
+                        svg_file_path = os.path.splitext(puml_file)[0] + '.svg'
+                        if sublime.yes_no_cancel_dialog("Вы хотите открыть svg файл?") == sublime.DIALOG_YES:
+                            if not self._open_file_in_default_program(svg_file_path):
+                                sublime.error_message("Не удалось открыть SVG файл в программе по умолчанию")
                     else:
                         status_parts.append(".svg не создан (см. предупреждения)")
-                
+
                 self.view.window().status_message(". ".join(status_parts) + ".")
             else:
                 msg = "URQ to PlantUML Error: Файл .puml не был создан."
@@ -498,6 +504,24 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             return all_locs[loc_id][0]
         
         return "неизвестная"
+
+    def _open_file_in_default_program(self, file_path):
+        """Открывает файл в программе по умолчанию"""
+        try:
+            if sys.platform.startswith('win'):
+                # Windows
+                os.startfile(file_path)
+            elif sys.platform.startswith('darwin'):
+                # macOS
+                subprocess.call(['open', file_path])
+            else:
+                # Linux
+                subprocess.call(['xdg-open', file_path])
+            return True
+        except Exception as e:
+            self._add_warning("Не удалось открыть файл {}: {}".format(file_path, e))
+            return False
+
 
     def _sanitize(self, text, max_len=BTN_LIMIT):
         """Очищает текст от проблемных символов и обрезает по длине"""
