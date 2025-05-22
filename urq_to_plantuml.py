@@ -27,7 +27,7 @@ PHANTOM_NODE = """state "//phantom" as PHANTOM_NODE_URQ #ffcccb {
   PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
 }
 """
-
+# !define PLANTUML_LIMIT_SIZE 8192
 SKIN_PARAMS = """skinparam stateArrowColor #606060
 skinparam state {
     BackgroundColor #F0F8FF
@@ -59,6 +59,7 @@ GOTO_PATTERN = re.compile(r'^\s*\bgoto\b', re.MULTILINE | re.IGNORECASE)
 PLN_PATTERN = re.compile(r'pln\s+([^.\n]+)')
 BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', re.MULTILINE | re.IGNORECASE)
 GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.MULTILINE | re.IGNORECASE)
+PLN_NEWLINE_PATTERN = re.compile(r'[\s\t]*\n[\s\t]*pln\b', re.IGNORECASE) # для удаления \n*pln
 
 class PlantumlGenerator:
     """Класс для генерации диаграмм через онлайн сервис PlantUML"""
@@ -129,7 +130,9 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             puml_content = self._generate_plantuml(locs, all_locs, links, auto_links, goto_links, puml_file)
             
             if os.path.exists(puml_file):
-                self.view.window().open_file(puml_file)
+                # !!! не открывать лишний раз puml файл
+                if not png and not svg:
+                    self.view.window().open_file(puml_file)
                 
                 status_parts = ["Конвертация URQ в PlantUML: .puml файл сгенерирован"]
                 
@@ -500,11 +503,16 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         """Очищает текст от проблемных символов и обрезает по длине"""
         if not text:
             return ""
-        
+        # Убираем pln
+        text = PLN_NEWLINE_PATTERN.sub(' ', text)
+
         # Обрезаем если слишком длинно
         if len(text) > max_len:
-            text = text[:max_len] + "..."
-        
+            text = text[:max_len].strip()
+
+        if len(text) > max_len:
+            text = text + "..."
+
         # Заменяем кавычки на безопасные
         return text.replace('"', "''")
 
