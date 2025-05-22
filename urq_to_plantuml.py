@@ -508,10 +508,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
         # Обрезаем если слишком длинно
         if len(text) > max_len:
-            text = text[:max_len].strip()
-
-        if len(text) > max_len:
-            text = text + "..."
+            text = text[:max_len].strip() + "..."
 
         # Заменяем кавычки на безопасные
         return text.replace('"', "''")
