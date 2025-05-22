@@ -1,10 +1,22 @@
+# This is Sublime Text plugin, it supports Python 3.3 only (no f-strings)
+
 PLANTUML_JAR_PATH = "C:\\java\\plantuml-1.2025.2.jar"
+
+# Лимиты текста
+LOC_LIMIT = 40
+DESC_LIMIT = 50
+BTN_LIMIT = 30
 
 import sublime
 import sublime_plugin
 import os
 import re
 import subprocess
+import string
+import base64
+import zlib
+import urllib.request
+import urllib.error
 
 # Константы стилей PlantUML
 PHANTOM_NODE = """state "//phantom" as PHANTOM_NODE_URQ #ffcccb {
@@ -43,13 +55,50 @@ PLN_PATTERN = re.compile(r'pln\s+([^.\n]+)')
 BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', re.MULTILINE | re.IGNORECASE)
 GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.MULTILINE | re.IGNORECASE)
 
+class PlantumlGenerator:
+    def __init__(self, server_url="http://www.plantuml.com/plantuml/"):
+        self.server_url = server_url
+        self.p_alpha = string.digits + string.ascii_uppercase + string.ascii_lowercase + '-_'
+        self.b64_alpha = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
+        self.b64_to_p = str.maketrans(self.b64_alpha, self.p_alpha)
+
+    def _req(self, type, text):
+        enc = zlib.compress(text.encode())[2:-4]
+        enc_b64 = base64.b64encode(enc).decode().translate(self.b64_to_p)
+        url = "{}{}/{}".format(self.server_url, type, enc_b64)
+        h = {'User-Agent': 'Sublime URQ2PUML'}
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=30) as resp:
+                if resp.getcode() == 200:
+                    return resp.read()
+                err_body = resp.read().decode(errors='replace') or "(empty)"
+                err_msg = "HTTP Error {}: {}. Body: {}".format(resp.getcode(), resp.reason, err_body)
+                print("Online Gen Error Details: " + err_msg)
+                raise urllib.error.HTTPError(url, resp.getcode(), err_msg, resp.headers, None)
+        except urllib.error.HTTPError as e_http:
+            print("Online Gen HTTPError: {} {}".format(e_http.code, e_http.reason))
+            raise
+        except Exception as e_gen:
+            raise RuntimeError("Сервер PlantUML ({}) ошибка: {}".format(type(e_gen).__name__, e_gen))
+
+    def generate_png(self, plantuml_text):
+        return self._req("img", plantuml_text)
+
+    def generate_svg(self, plantuml_text):
+        return self._req("svg", plantuml_text)
+
 class UrqToPlantumlCommand(sublime_plugin.TextCommand):
-    def run(self, edit):
+    def run(self, edit, png=False, svg=False, net=False):
         current_file = self.view.file_name()
 
         if not current_file or not current_file.lower().endswith('.qst'):
             sublime.error_message("Файл должен быть URQ (.qst)")
             return
+
+        # Автопереключение на сетевой режим если jar не найден
+        if not net and not os.path.exists(PLANTUML_JAR_PATH):
+            net = True
+            print("URQ to PlantUML: JAR не найден, переключение на сетевой режим")            
 
         self.view.window().status_message("Конвертация URQ в PlantUML...")
         self.warnings = []
@@ -61,46 +110,36 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 return
 
             puml_file = os.path.splitext(current_file)[0] + '.puml'
-            self._generate_plantuml(locations, lost_locations, transitions, auto_trans, goto_trans, puml_file)
+            puml_content = self._generate_plantuml(locations, lost_locations, transitions, auto_trans, goto_trans, puml_file)
             
             if os.path.exists(puml_file):
                 self.view.window().open_file(puml_file)
                 
-                # Диалог для генерации PNG/SVG
-                want_png = sublime.ok_cancel_dialog("PUML файл создан. Хотите сгенерировать PNG?", "Да", "Нет")
+                status_parts = ["Конвертация URQ в PlantUML: .puml файл сгенерирован"]
                 
-                if want_png:
-                    want_svg = sublime.ok_cancel_dialog("Также создать SVG файл?", "Да", "Нет")
-                    
-                    png_success = self._generate_png_from_puml(puml_file)
-                    
-                    if want_svg:
-                        svg_success = self._generate_svg_from_puml(puml_file)
-                        
-                        if png_success and svg_success:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml, .png и .svg файлы сгенерированы.")
-                        elif png_success:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml и .png файлы сгенерированы. SVG не создан (см. предупреждения).")
-                        elif svg_success:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml и .svg файлы сгенерированы. PNG не создан (см. предупреждения).")
-                        else:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml файл сгенерирован. PNG и SVG не созданы (см. предупреждения).")
+                if png:
+                    if net:
+                        png_success = self._generate_png_online(puml_content, puml_file)
                     else:
-                        if png_success:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml и .png файлы сгенерированы.")
-                        else:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml файл сгенерирован. PNG не создан (см. предупреждения).")
-                else:
-                    want_svg_only = sublime.ok_cancel_dialog("Может быть, создать только SVG файл?", "Да", "Нет")
+                        png_success = self._generate_png_from_puml(puml_file)
                     
-                    if want_svg_only:
-                        svg_success = self._generate_svg_from_puml(puml_file)
-                        if svg_success:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml и .svg файлы сгенерированы.")
-                        else:
-                            self.view.window().status_message("Конвертация URQ в PlantUML: .puml файл сгенерирован. SVG не создан (см. предупреждения).")
+                    if png_success:
+                        status_parts.append(".png файл создан" + (" онлайн" if net else "") + " и открыт")
                     else:
-                        self.view.window().status_message("Конвертация URQ в PlantUML: .puml файл сгенерирован.")
+                        status_parts.append(".png не создан (см. предупреждения)")
+                
+                if svg:
+                    if net:
+                        svg_success = self._generate_svg_online(puml_content, puml_file)
+                    else:
+                        svg_success = self._generate_svg_from_puml(puml_file)
+                    
+                    if svg_success:
+                        status_parts.append(".svg файл создан" + (" онлайн" if net else ""))
+                    else:
+                        status_parts.append(".svg не создан (см. предупреждения)")
+                
+                self.view.window().status_message(". ".join(status_parts) + ".")
             else:
                 msg = "URQ to PlantUML Error: Файл .puml не был создан."
                 self.warnings.append(msg)
@@ -210,8 +249,8 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         sorted_locs = sorted(locations.items(), key=lambda x: int(x[1][1]))
         
         for name, (desc, num) in sorted_locs:
-            clean_name = self._sanitize(name, 40)
-            clean_desc = self._sanitize(desc, 50)
+            clean_name = self._sanitize(name, LOC_LIMIT)
+            clean_desc = self._sanitize(desc, DESC_LIMIT)
             
             state_line = STATE_FORMAT.format(clean_name, num)
             if name in end_locs:
@@ -222,8 +261,8 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
         if lost_locations:
             for lost_key, (desc, line_number, original_name) in lost_locations.items():
-                clean_name = self._sanitize(original_name, 40)
-                clean_desc = self._sanitize(desc, 50)
+                clean_name = self._sanitize(original_name, LOC_LIMIT)
+                clean_desc = self._sanitize(desc, DESC_LIMIT)
                 
                 state_line = LOST_STATE_FORMAT.format(clean_name, lost_key, LOST_COLOR)
                 parts.append(state_line + "\n")
@@ -237,12 +276,16 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         parts.append(self._add_goto_transitions(goto_trans, locations))
         parts.append("@enduml\n")
         
+        content = ''.join(parts)
+        
         try:
-            with open(output_file, 'w', encoding='utf-8-sig') as f:
-                f.write(''.join(parts))
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(content)
             print("URQ to PlantUML: Файл создан: {}".format(output_file))
         except Exception as e:
             raise Exception("Ошибка записи файла {}: {}".format(output_file, e))
+        
+        return content
 
     def _generate_svg_from_puml(self, puml_file):
         """
@@ -304,6 +347,47 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         else:
             error_msg = stderr.strip() if stderr else "Неизвестная ошибка"
             self._add_warning("Ошибка PlantUML при создании SVG: {}".format(error_msg))
+            return False
+
+    def _generate_png_online(self, puml_content, puml_file):
+        """Генерирует PNG через онлайн сервис PlantUML"""
+        try:
+            self.view.window().status_message("PNG файл генерируется онлайн...")
+            print("URQ to PlantUML: PNG файл генерируется онлайн...")
+            
+            generator = PlantumlGenerator()
+            png_data = generator.generate_png(puml_content)
+            
+            png_file = os.path.splitext(puml_file)[0] + '.png'
+            with open(png_file, 'wb') as f:
+                f.write(png_data)
+            
+            print("URQ to PlantUML: PNG файл создан онлайн: {}".format(png_file))
+            self.view.window().open_file(png_file)
+            return True
+            
+        except Exception as e:
+            self._add_warning("Ошибка создания PNG онлайн: {}".format(e))
+            return False
+
+    def _generate_svg_online(self, puml_content, puml_file):
+        """Генерирует SVG через онлайн сервис PlantUML"""
+        try:
+            self.view.window().status_message("SVG файл генерируется онлайн...")
+            print("URQ to PlantUML: SVG файл генерируется онлайн...")
+            
+            generator = PlantumlGenerator()
+            svg_data = generator.generate_svg(puml_content)
+            
+            svg_file = os.path.splitext(puml_file)[0] + '.svg'
+            with open(svg_file, 'wb') as f:
+                f.write(svg_data)
+            
+            print("URQ to PlantUML: SVG файл создан онлайн: {}".format(svg_file))
+            return True
+            
+        except Exception as e:
+            self._add_warning("Ошибка создания SVG онлайн: {}".format(e))
             return False
 
     def _generate_png_from_puml(self, puml_file):
@@ -376,10 +460,10 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 continue
                 
             if target_num is not None:
-                clean_label = self._sanitize(label, 30)
+                clean_label = self._sanitize(label, BTN_LIMIT)
                 parts.append(BTN_FORMAT.format(source_num, target_num, clean_label))
             else:
-                phantom_label = self._sanitize(label, 30)
+                phantom_label = self._sanitize(label, BTN_LIMIT)
                 parts.append(PHANTOM_FORMAT.format(source_num, phantom_label))
                 self._add_warning("Локация '{}' для btn из '{}' не найдена".format(target, source))
         return ''.join(parts)
@@ -410,7 +494,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             if target_num is not None:
                 parts.append(GOTO_FORMAT.format(source_num, target_num, "goto"))
             else:
-                phantom_label = self._sanitize(target, 30)
+                phantom_label = self._sanitize(target, BTN_LIMIT)
                 parts.append(PHANTOM_FORMAT.format(source_num, phantom_label))
                 self._add_warning("Локация '{}' для goto из '{}' не найдена".format(target, source))
         return ''.join(parts)
@@ -418,7 +502,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
     def _get_location_num(self, name, locations):
         return locations.get(name, [None, None])[1]
 
-    def _sanitize(self, text, max_len=30):
+    def _sanitize(self, text, max_len=BTN_LIMIT):
         if not text:
             return ""
         

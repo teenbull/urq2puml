@@ -1,4 +1,4 @@
-﻿@startuml
+@startuml
 state "//phantom" as PHANTOM_NODE_URQ #ffcccb {
   PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
 }
