@@ -1,0 +1,36 @@
+[
+    {
+        "caption": "qst: создать граф в puml (PlantUML)",
+        "command": "urq_to_plantuml",
+    },
+    {
+        "caption": "qst: создать граф в png",
+        "command": "urq_to_plantuml",
+        "args": {"png": true}
+    },
+    {
+        "caption": "qst: создать граф в png и svg", 
+        "command": "urq_to_plantuml",
+        "args": {"svg": true}
+    },
+    {
+        "caption": "qst: создать граф в png и svg",
+        "command": "urq_to_plantuml", 
+        "args": {"png": true, "svg": true}
+    },
+    // {
+    //     "caption": "qst: создать граф в png (онлайн)",
+    //     "command": "urq_to_plantuml",
+    //     "args": {"png": true, "net": true}
+    // },
+    // {
+    //     "caption": "qst: создать граф в svg (онлайн)",
+    //     "command": "urq_to_plantuml",
+    //     "args": {"svg": true, "net": true}
+    // },
+    // {
+    //     "caption": "qst: создать граф в png и svg (онлайн)",
+    //     "command": "urq_to_plantuml",
+    //     "args": {"png": true, "svg": true, "net": true}
+    // }
+]

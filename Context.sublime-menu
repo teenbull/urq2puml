@@ -1,0 +1,50 @@
+[
+    {
+        "caption": "-"
+    },
+    {
+        "caption": "URQ to PlantUML",
+        "children": [
+            {
+                "caption": "Конвертировать в граф PlantUML",
+                "command": "urq_to_plantuml",
+            },
+            {
+                "caption": "-"
+            },            
+            {
+                "caption": "Конвертировать в png",
+                "command": "urq_to_plantuml",
+                "args": {"png": true}
+            },
+            {
+                "caption": "Конвертировать в svg",
+                "command": "urq_to_plantuml", 
+                "args": {"svg": true}
+            },
+            {
+                "caption": "Конвертировать png и svg",
+                "command": "urq_to_plantuml",
+                "args": {"png": true, "svg": true}
+            },
+            {
+                "caption": "-"
+            },
+            {
+                "caption": "Онлайн: Конвертировать в png",
+                "command": "urq_to_plantuml",
+                "args": {"png": true, "net": true}
+            },
+            {
+                "caption": "Онлайн: Конвертировать в svg", 
+                "command": "urq_to_plantuml",
+                "args": {"svg": true, "net": true}
+            },
+            {
+                "caption": "Онлайн: Конвертировать в png и svg",
+                "command": "urq_to_plantuml",
+                "args": {"png": true, "svg": true, "net": true}
+            }
+        ]
+    }
+]
