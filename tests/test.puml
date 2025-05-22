@@ -1,23 +1,29 @@
 @startuml
+state "//phantom" as PHANTOM_NODE_URQ #ffcccb {
+  PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
+}
+skinparam stateArrowColor #606060
 skinparam state {
-  BackgroundColor #FFE4E1
-  BorderColor #8B4513
-  FontColor #800000
-  FontName Papyrus
-  BorderThickness 2
-  Stereotyping true
+    BackgroundColor #F0F8FF
+    BorderColor #A9A9A9
+    FontColor #303030
+    ArrowFontColor #404040
 }
-
-skinparam arrow {
-  Color #8B4513
-  FontColor #800000
-  Thickness 1.5
-}
-
-state "2\nВы пришли к высокой горе" as 2
-state "Старт\nПример текст стартовой локации" as Старт
-state "1\nВы пришли в лес" as 1
-
-Старт --> 1 : "иди направо"
-Старт --> 2 : "иди налево"
+state "Фальшстарт" as 0
+0: Нет описания
+state "Старт" as 1
+1: Пример текст стартовой локации: Это не м...
+state "Дремучий лес" as 2
+2: Вы в дремучем лесу
+state "1" as 3
+3: Вы пришли в лес
+state "2" as 4 #d0f0d0
+4: Вы пришли к высокой горе
+[*] --> 0
+1 --> 3 : иди направо
+1 --> 4 : иди налево
+2 -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : [иди туда не знаю куда]
+0 -[#CD5C5C,dotted]-> 1
+2 -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : [dsfsdf]
+3 --> 2 : [goto]
 @enduml

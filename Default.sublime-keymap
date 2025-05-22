@@ -5,14 +5,25 @@
         "command": "urq_to_plantuml",
         "context": [{ "key": "selector", "operator": "equal", "operand": "source.urql" }]
     },
-     // создает на основе qst файла uml файл и png граф
-    // {
-    //     "keys": ["ctrl+alt+u"],
-    //     "command": "urq_to_plantuml",
-    //     "context": [{ "key": "selector", "operator": "equal", "args": {"generate_png": "net"}, "operand": "source.urql" }]
-    // },
-//  [
-//   { "keys": ["ctrl+shift+p"], "command": "urq_to_plantuml" },
-//   { "keys": ["ctrl+shift+n"], "command": "urq_to_plantuml_no_png" }
-// ]
+    {
+        "caption": "URQ: Convert to PlantUML (PNG+SVG, Local then Online if net)",
+        "command": "urq_to_plantuml",
+        "args": {"svg": true}
+    },
+    {
+        "caption": "URQ: Convert to PlantUML (PNG, Local Only)",
+        "command": "urq_to_plantuml",
+        "args": {"net": false}
+    },
+    {
+        "caption": "URQ: Convert to PlantUML (PNG+SVG, Local Only)",
+        "command": "urq_to_plantuml",
+        "args": {"svg": true, "net": false}
+    },
+    {
+        "caption": "URQ: Convert to PlantUML (No Diagrams, PUML only)",
+        "command": "urq_to_plantuml",
+        "args": {"nopng": true} // nopng подразумевает, что и svg не будет
+    }
+
 ]

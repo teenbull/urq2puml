@@ -2,259 +2,308 @@ import sublime
 import sublime_plugin
 import os
 import re
-import tempfile
-import platform
-import subprocess
-import urllib.request
-import urllib.parse
-import base64
-import zlib
-import io
-import string
+# Removed: tempfile, subprocess, urllib.request, urllib.parse, base64, zlib, string
+
+# Constants for PlantUML styling
+_PLANTUML_PHANTOM_NODE_DEFINITION = """state "//phantom" as PHANTOM_NODE_URQ #ffcccb {
+  PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
+}
+"""
+_PLANTUML_SKINPARAMS = """skinparam stateArrowColor #606060
+skinparam state {
+    BackgroundColor #F0F8FF
+    BorderColor #A9A9A9
+    FontColor #303030
+    ArrowFontColor #404040
+}
+"""
+_END_COLOR = "#d0f0d0"
+_AUTO_FORMAT = "{0} -[#CD5C5C,dotted]-> {1}\n"
+_PHANTOM_ARROW = "[#CD5C5C,dotted]"
+_START_LOC = "[*] --> 0\n"
 
 class UrqToPlantumlCommand(sublime_plugin.TextCommand):
-    def run(self, edit, nopng=False):
-        # Получаем путь к текущему файлу
+    def run(self, edit): # Removed nopng parameter
+        # Путь к файлу
         current_file = self.view.file_name()
-        
-        # Проверяем, что текущий файл - это qst файл
+
+        # Проверка расширения файла
         if not current_file or not current_file.lower().endswith('.qst'):
-            sublime.error_message("Текущий файл не является URQ (.qst) файлом")
+            sublime.error_message("Файл должен быть URQ (.qst)")
             return
-        
-        # Показываем статус
+
+        # Статус бар
         self.view.window().status_message("Конвертация URQ в PlantUML...")
-        
+
+        # Список предупреждений
+        self.warnings = []
+
         try:
-            # Парсим URQ файл
-            locations, transitions = self._parse_urq_file(current_file)
-            
-            # Создаем путь к выходному .puml файлу
+            # Парсинг файла URQ
+            locations_data = self._parse_urq_file(current_file)
+
+            # Если парсинг вернул пустые данные из-за ошибки, останавливаемся
+            if not locations_data or not locations_data[0]:
+                 # Сообщения об ошибках парсинга уже добавлены в self.warnings и выведены в консоль
+                 return
+
+            # Путь к выходному .puml файлу
             puml_file = os.path.splitext(current_file)[0] + '.puml'
-            
-            # Генерируем PlantUML код
-            plantuml_code = self._generate_plantuml(locations, transitions, puml_file)
-            
-            # Если nopng не задан, то генерируем PNG
-            if not nopng:
-                # Создаем путь к выходному .png файлу
-                png_file = os.path.splitext(current_file)[0] + '.png'
-                
-                # Генерируем изображение через python-plantuml
-                success = self._generate_diagram(plantuml_code, png_file)
-                
-                if success:
-                    # Открываем сгенерированный файл PlantUML в Sublime
-                    self.view.window().open_file(puml_file)
-                    self._open_image(png_file)
-                    
-                    # Показываем сообщение об успешной конвертации
-                    self.view.window().status_message("Конвертация URQ в PlantUML завершена успешно")
-                else:
-                    sublime.error_message("Ошибка при создании диаграммы. Проверьте подключение к интернету.")
-            else:
-                # Открываем только PUML файл без генерации PNG
-                self.view.window().open_file(puml_file)
-                self.view.window().status_message("Конвертация URQ в PlantUML завершена успешно (без PNG)")
-                
+
+            # Генерация PlantUML кода
+            self._generate_plantuml(locations_data, puml_file) # plantuml_code variable no longer needed here
+
+            # Открытие .puml файла
+            self.view.window().open_file(puml_file)
+            self.view.window().status_message("Конвертация URQ в PlantUML: .puml файл сгенерирован.")
+
+
         except Exception as e:
-            sublime.error_message("Произошла ошибка при конвертации: " + str(e))
-    
+            # Критическая ошибка парсинга или записи PUML
+            msg = "URQ to PlantUML Critical Error: Произошла ошибка при конвертации: {}".format(e)
+            self.warnings.append(msg)
+            print(msg)
+
+        finally:
+            # Показать все собранные предупреждения в консоль
+            if self.warnings:
+                 print("\n" + "="*20 + " URQ to PlantUML Warnings " + "="*20)
+                 for warning in self.warnings:
+                     print(warning)
+                 print("="*61 + "\n")
+
+
     def _parse_urq_file(self, file_path):
-        """Парсит URQ файл и возвращает структуру локаций и переходов"""
+        """Парсит URQ файл. Возвращает (locations, transitions, numbered_locations, auto_transitions, goto_transitions, first_location_name)."""
         try:
-            # Сначала пробуем открыть с UTF-8
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
         except UnicodeDecodeError:
-            # Если не получилось, пробуем с cp1251
-            with open(file_path, 'r', encoding='cp1251') as f:
-                content = f.read()
-        
-        # Разбиваем файл на локации
-        locations = {}
-        transitions = []
-        
-        # Находим все локации (метки)
-        location_blocks = re.split(r':([^\n]+)', content)[1:]  # Пропускаем первый элемент (текст до первой метки)
-        
-        for i in range(0, len(location_blocks), 2):
-            if i+1 < len(location_blocks):
-                location_name = location_blocks[i].strip()
-                location_content = location_blocks[i+1].strip()
-                
-                # Извлекаем первое предложение из первого pln
-                pln_match = re.search(r'pln\s+([^.\n]+)', location_content)
-                description = pln_match.group(1).strip() if pln_match else "Нет описания"
-                
-                # Обрезаем длинные описания
-                if len(description) > 40:
-                    description = description[:37] + "..."
-                
-                locations[location_name] = description
-                
-                # Находим все btn в этой локации
-                btn_matches = re.finditer(r'btn\s+([^,\n]+),\s*([^\n]+)', location_content)
-                for match in btn_matches:
-                    target_location = match.group(1).strip()
-                    button_text = match.group(2).strip()
-                    transitions.append((location_name, target_location, button_text))
-        
-        return locations, transitions
-    
-    def _generate_plantuml(self, locations, transitions, output_file):
-        """Генерирует PlantUML код на основе локаций и переходов"""
-        # Загружаем стили из файла шаблонов
-        style_name = self.view.settings().get("urq_to_plantuml_style", "fantasy")
-        style = self._get_style(style_name)
-        
+            try:
+                with open(file_path, 'r', encoding='cp1251') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                 msg = "URQ to PlantUML Error: Не удалось определить кодировку файла {}. Попробуйте UTF-8.".format(os.path.basename(file_path))
+                 self.warnings.append(msg)
+                 print(msg)
+                 return ({}, [], {}, [], [], None)
+
+        locations = {} # location_name -> description
+        numbered_locations = {} # location_name -> number_alias (str)
+        location_details = [] # [(name, content_start, content_end)] - для сохранения порядка
+
+        location_marker_pattern = re.compile(r'^\s*:([^\n]+)', re.MULTILINE)
+        location_matches = list(location_marker_pattern.finditer(content))
+
+        if not location_matches:
+             msg = "URQ to PlantUML Warning: В файле {} не найдено ни одной метки локации (:LocationName).".format(os.path.basename(file_path))
+             self.warnings.append(msg)
+             print(msg)
+             return ({}, [], {}, [], [], None)
+
+        # Pass 1: Идентификация всех локаций, их содержимого и присвоение номеров
+        for i, match in enumerate(location_matches):
+            name = match.group(1).strip()
+            start_pos = match.end()
+            end_pos = location_matches[i+1].start() if i + 1 < len(location_matches) else len(content)
+
+            if name not in numbered_locations:
+                numbered_locations[name] = str(len(numbered_locations))
+
+            # Извлекаем описание (первый pln)
+            # For pln, search in the original slice before any potential lstrip for transitions
+            location_content_for_pln = content[start_pos:end_pos]
+            pln_match = re.search(r'pln\s+([^.\n]+)', location_content_for_pln)
+            description = pln_match.group(1).strip() if pln_match else "Нет описания"
+            locations[name] = description
+
+            location_details.append((name, start_pos, end_pos))
+
+        first_location_name = location_details[0][0] if location_details else None
+        raw_transitions = []
+
+        # Pass 2: Идентификация переходов
+        for i, (name, start_pos, end_pos) in enumerate(location_details):
+            location_content_slice = content[start_pos:end_pos]
+            
+            # Apply lstrip to the location's content block before regex for transitions
+            # This was the hypothesized fix based on user feedback
+            location_content = location_content_slice.lstrip()
+
+            has_end = re.search(r'^\s*\bend\b', location_content, re.MULTILINE | re.IGNORECASE) is not None
+            # Note: has_goto_keyword check might be slightly less reliable if lstrip removed all lines before a goto
+            # However, for identifying auto-transitions, it's about the *presence* of the keywords.
+            has_goto_keyword_in_stripped = re.search(r'^\s*\bgoto\b', location_content, re.MULTILINE | re.IGNORECASE) is not None
+
+
+            # Автоматический переход (если нет end, goto, и это не последняя локация)
+            # The logic for auto-transition should ideally consider the original structure
+            # before lstrip, or ensure lstrip doesn't change the "emptiness" interpretation.
+            # For now, using has_end and has_goto_keyword_in_stripped on the lstrip'd content.
+            if not has_end and not has_goto_keyword_in_stripped and i + 1 < len(location_details):
+                 next_location_name = location_details[i+1][0]
+                 raw_transitions.append((name, next_location_name, "auto", "auto"))
+
+
+            btn_matches = re.finditer(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', location_content, re.MULTILINE | re.IGNORECASE)
+            for btn_match_obj in btn_matches:
+                target_location = btn_match_obj.group(1).strip()
+                button_text = btn_match_obj.group(2).strip()
+                if target_location:
+                    raw_transitions.append((name, target_location, button_text, "btn"))
+                else:
+                     msg = "URQ to PlantUML Warning: Пустая цель btn (из '{}', кнопка '{}'). Переход пропущен в парсинге.".format(name, button_text)
+                     self.warnings.append(msg)
+                     print(msg)
+
+            goto_matches = re.finditer(r'^\s*\bgoto\s+(.+)', location_content, re.MULTILINE | re.IGNORECASE)
+            for goto_match_obj in goto_matches:
+                target_location = goto_match_obj.group(1).strip()
+                if target_location:
+                    raw_transitions.append((name, target_location, "goto", "goto"))
+                else:
+                    msg = "URQ to PlantUML Warning: Пустая цель goto (из '{}'). Переход пропущен в парсинге.".format(name)
+                    self.warnings.append(msg)
+                    print(msg)
+
+
+        transitions = [(s, t, l) for s, t, l, type_val in raw_transitions if type_val == "btn"]
+        auto_transitions = [(s, t, l) for s, t, l, type_val in raw_transitions if type_val == "auto"]
+        goto_transitions = [(s, t, l) for s, t, l, type_val in raw_transitions if type_val == "goto"]
+
+        return (locations, transitions, numbered_locations, auto_transitions, goto_transitions, first_location_name)
+
+    def _generate_plantuml(self, locations_data, output_file):
+        """Генерирует PlantUML код."""
+        locations = locations_data[0]
+        transitions = locations_data[1] # (source_name, target_name, label) - btn
+        auto_transitions = locations_data[3] # (source_name, target_name, "auto") - auto
+        goto_transitions = locations_data[4] # (source_name, target_name, "goto") - goto
+        numbered_locations = locations_data[2] # location_name -> number_alias (str)
+
         plantuml_code = "@startuml\n"
-        
-        # Добавляем настройки стиля
-        plantuml_code += style
-        
-        # Определяем состояния (локации)
-        for name, description in locations.items():
-            # Экранируем кавычки в описании
-            description = description.replace('"', '\\"')
-            plantuml_code += 'state "{0}\\n{1}" as {2}\n'.format(name, description, name.replace(" ", "_"))
-        
-        plantuml_code += "\n"
-        
-        # Определяем переходы
-        for source, target, label in transitions:
-            # Экранируем кавычки в тексте кнопки
-            label = label.replace('"', '\\"')
-            if label and len(label) > 20:
-                label = label[:17] + "..."
-            
-            # Проверяем, существует ли целевая локация
-            if target in locations:
-                plantuml_code += '{0} --> {1} : "{2}"\n'.format(
-                    source.replace(" ", "_"), 
-                    target.replace(" ", "_"), 
-                    label
-                )
-        
-        plantuml_code += "@enduml"
-        
-        # Записываем PlantUML код в файл
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(plantuml_code)
-        
-        return plantuml_code
+        plantuml_code += _PLANTUML_PHANTOM_NODE_DEFINITION
+        plantuml_code += _PLANTUML_SKINPARAMS
 
-    def _get_style(self, style_name="default"):
-        """Получает стиль из файла шаблонов"""
-        try:
-            # Путь к файлу шаблонов рядом с модулем плагина
-            plugin_folder = os.path.dirname(os.path.abspath(__file__))
-            templates_file = os.path.join(plugin_folder, "templates.json")
-            
-            # Если файл шаблонов не существует, используем стиль по умолчанию
-            if not os.path.exists(templates_file):
-                return self._get_default_style()
-            
-            # Загружаем шаблоны из файла
-            with open(templates_file, 'r', encoding='utf-8') as f:
-                templates = sublime.decode_value(f.read())
-            
-            # Получаем запрошенный стиль или стиль по умолчанию
-            if style_name in templates:
-                return templates[style_name]
+        source_locations = set()
+        all_raw_transitions_for_end_loc_detection = transitions + auto_transitions + goto_transitions
+        for source, _, _ in all_raw_transitions_for_end_loc_detection:
+            source_locations.add(source)
+        end_locations = [name for name in locations if name not in source_locations]
+
+        sorted_location_names = sorted(numbered_locations, key=lambda k: int(numbered_locations[k]))
+
+        for name in sorted_location_names:
+             loc_number = numbered_locations[name]
+             description = locations.get(name, "Нет описания")
+
+             sanitized_name = self.sanitize_string(name, max_length=40)
+             sanitized_description = self.sanitize_string(description, max_length=50)
+
+             plantuml_code += 'state "{0}" as {1}'.format(sanitized_name, loc_number)
+             if name in end_locations:
+                 plantuml_code += ' {}'.format(_END_COLOR)
+             plantuml_code += '\n'
+             plantuml_code += '{0}: {1}\n'.format(loc_number, sanitized_description)
+
+        if '0' in numbered_locations.values():
+            plantuml_code += _START_LOC
+
+        # btn transitions
+        for source, target, label in transitions: # label is button text
+            source_num = numbered_locations.get(source)
+            target_num = numbered_locations.get(target)
+
+            if source_num is not None:
+                if target_num is not None:
+                    sanitized_label = self.sanitize_string(label, max_length=30)
+                    plantuml_code += '{0} --> {1} : {2}\n'.format(source_num, target_num, sanitized_label)
+                else:
+                    # Target location not found, redirect to PHANTOM_NODE_URQ
+                    sanitized_phantom_label = self.sanitize_string(label, max_length=30)
+                    # Apply new style using the combined style specifier
+                    plantuml_code += '{0} -{1}-> PHANTOM_NODE_URQ : [{2}]\n'.format(
+                        source_num, _PHANTOM_ARROW, sanitized_phantom_label)
+                    msg = "URQ to PlantUML Warning: Целевая локация '{}' для btn из '{}' (метка: '{}') не найдена. Переход перенаправлен на PHANTOM_NODE_URQ.".format(target, source, label)
+                    self.warnings.append(msg)
+                    print(msg)
             else:
-                # Исправлено - убраны f-строки
-                sublime.status_message("Стиль '{0}' не найден, используется стиль по умолчанию".format(style_name))
-                return templates.get("default", self._get_default_style())
-                
-        except Exception as e:
-            # Исправлено - убраны f-строки
-            sublime.error_message("Ошибка при загрузке стилей: {0}".format(str(e)))
-            return self._get_default_style()
+                 msg = "URQ to PlantUML Warning: Исходная локация '{}' для перехода btn к '{}' ('{}') не найдена. Переход пропущен.".format(source, target, label)
+                 self.warnings.append(msg)
+                 print(msg)
 
-    def _get_default_style(self):
-        """Возвращает стиль по умолчанию, если файл шаблонов недоступен"""
-        return """skinparam state {
-      BackgroundColor LightBlue
-      BorderColor Blue
-      FontName Arial
-    }
+        # auto transitions
+        for source, target, _ in auto_transitions:
+            source_num = numbered_locations.get(source)
+            target_num = numbered_locations.get(target)
 
-    """
-    
-    def _generate_diagram(self, plantuml_code, output_image):
-        """Генерирует изображение через встроенный механизм PlantUML"""
+            if source_num is not None and target_num is not None:
+                 plantuml_code += _AUTO_FORMAT.format(source_num, target_num)
+            else:
+                 if source_num is None:
+                     msg = "URQ to PlantUML Warning: Исходная локация '{}' для авто-перехода к '{}' не найдена. Переход пропущен.".format(source, target)
+                 else:
+                     msg = "URQ to PlantUML Warning: Целевая локация '{}' для авто-перехода из '{}' не найдена. Переход пропущен (авто).".format(target, source)
+                 self.warnings.append(msg)
+                 print(msg)
+
+        # goto transitions
+        for source, target, label_is_goto_keyword in goto_transitions: # label_is_goto_keyword is "goto"
+            source_num = numbered_locations.get(source)
+            target_num = numbered_locations.get(target)
+
+            if source_num is not None:
+                if target_num is not None:
+                     plantuml_code += '{0} --> {1} : [{2}]\n'.format(source_num, target_num, label_is_goto_keyword)
+                else:
+                    # Target location not found, redirect to PHANTOM_NODE_URQ
+                    sanitized_phantom_target_name = self.sanitize_string(target, max_length=30)
+                    # Apply new style using the combined style specifier
+                    plantuml_code += '{0} -{1}-> PHANTOM_NODE_URQ : [{2}]\n'.format(
+                        source_num, _PHANTOM_ARROW, sanitized_phantom_target_name)
+                    msg = "URQ to PlantUML Warning: Целевая локация '{}' для goto из '{}' не найдена. Переход перенаправлен на PHANTOM_NODE_URQ.".format(target, source)
+                    self.warnings.append(msg)
+                    print(msg)
+            else:
+                 msg = "URQ to PlantUML Warning: Исходная локация '{}' для перехода goto к '{}' не найдена. Переход пропущен.".format(source, target)
+                 self.warnings.append(msg)
+                 print(msg)
+
+        plantuml_code += "@enduml\n"
+
         try:
-            # Используем встроенную реализацию PlantUML
-            plantuml_generator = EmbeddedPlantumlGenerator()
-            
-            # Генерируем диаграмму и сохраняем в файл
-            with open(output_image, 'wb') as f:
-                diagram = plantuml_generator.generate_png(plantuml_code)
-                f.write(diagram)
-            
-            return True
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(plantuml_code)
+            print("URQ to PlantUML: Файл PlantUML создан: {}".format(output_file))
         except Exception as e:
-            sublime.error_message("Ошибка при создании диаграммы: " + str(e))
-            return False
-    
-    def _open_image(self, image_path):        
-        """Открывает изображение в Sublime Text"""
-        try:
-            # Открываем изображение в Sublime Text вместо системного просмотрщика
-            self.view.window().open_file(image_path)
-            return True
-        except Exception as e:
-            sublime.error_message("Не удалось открыть изображение: " + str(e))
-            return False        
-        # """Открывает изображение в системном просмотрщике"""
-        # try:
-        #     # Определяем команду для открытия изображения в зависимости от ОС
-        #     system = platform.system()
-            
-        #     if system == "Windows":
-        #         os.startfile(image_path)
-        #     elif system == "Darwin":  # macOS
-        #         subprocess.Popen(["open", image_path])
-        #     else:  # Linux и другие Unix-подобные системы
-        #         subprocess.Popen(["xdg-open", image_path])
-                
-        #     return True
-        # except Exception as e:
-        #     sublime.error_message("Не удалось открыть изображение: " + str(e))
-        #     return False
+             msg = "URQ to PlantUML Critical Error: Ошибка записи PlantUML файла {}: {}".format(output_file, e)
+             self.warnings.append(msg)
+             print(msg)
+             raise Exception(msg)
 
+    def sanitize_string(self, s, max_length=30): # Default max_length as requested for general case
+        """Санитизирует строку для PlantUML: берет первую строку, обрезает, добавляет ... и экранирует символы."""
+        if s is None:
+            return ""
 
-class UrqToPlantumlNoPngCommand(sublime_plugin.TextCommand):
-    """Команда для запуска плагина без генерации PNG файла"""
-    def run(self, edit):
-        self.view.run_command('urq_to_plantuml', {'nopng': True})
+        # 1. Take only the first line
+        # s = s.splitlines()[0] if s.splitlines() else ""
 
+        # 2. Truncate if longer than max_length
+        add_ellipsis = False
+        if len(s) > max_length:
+            s = s[:max_length]
+            add_ellipsis = True
 
-# Встроенная реализация PlantUML (на основе python-plantuml)
-class EmbeddedPlantumlGenerator:
-    """Встроенная реализация для генерации PlantUML диаграмм без зависимостей"""
-    def __init__(self, server_url="http://www.plantuml.com/plantuml/img/"):
-        self.server_url = server_url
-        # Создаем таблицу для трансляции символов base64 в символы plantuml
-        self.plantuml_alphabet = string.digits + string.ascii_uppercase + string.ascii_lowercase + '-_'
-        self.base64_alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
-        self.b64_to_plantuml = str.maketrans(self.base64_alphabet, self.plantuml_alphabet)
-    
-    def generate_png(self, plantuml_text):
-        """Генерирует PNG-изображение из PlantUML кода"""
-        encoded = self.deflate_and_encode(plantuml_text)
-        url = self.server_url + encoded
-        
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sublime Text Plugin'}
-        req = urllib.request.Request(url, headers=headers)
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return response.read()
-    
-    def deflate_and_encode(self, plantuml_text):
-        """Сжимает PlantUML текст и кодирует его для сервера PlantUML."""
-        zlibbed_str = zlib.compress(plantuml_text.encode('utf-8'))
-        compressed_string = zlibbed_str[2:-4]  # Убираем заголовок zlib (2 байта) и контрольную сумму (4 байта)
-        b64_encoded = base64.b64encode(compressed_string).decode('utf-8')
-        return b64_encoded.translate(self.b64_to_plantuml)
+        # 3. Экранирование символов в обрезанной части
+        # Экранируем обратную косую черту, затем двойную кавычку
+        # This is important for PlantUML syntax if names/descriptions contain these characters.
+        # sanitized_s = s.replace('\\', '\\\\').replace('"', '\\"')
+        s = s.replace('\"','\'\'')
+
+        # 4. Добавление многоточия
+        if add_ellipsis:
+            return s + "..."
+        else:
+            return s
+

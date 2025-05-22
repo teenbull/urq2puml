@@ -1,14 +1,51 @@
+:Фальшстарт
+
 :Старт
-	pln Пример текст стартовой локации.
+	pln Пример текст стартовой локации: Это не метка.
 	btn 1, иди направо
 	btn 2, иди налево
 	end
 
+:Дремучий лес
+	pln Вы в дремучем лесу.
+	btn sdfsf, иди туда не знаю куда
+	goto dsfsdf
+	end
+
+
 :1
 	pln Вы пришли в лес.
+	goto Дремучий лес
 	end
 
 
 :2
 	pln Вы пришли к высокой горе.
 	end
+
+;@startuml
+;!theme vibrant
+;skinparam stateArrowColor #606060
+;skinparam state {
+;    BackgroundColor #F0F8FF
+;    BorderColor #A9A9A9
+;    FontColor #303030
+;    ArrowFontColor #404040
+;}
+;state "Фальшстарт" as 0
+;0: "Нет описания"
+;state "Старт" as 1
+;1: "Пример текст стартовой лока..."
+;state "Дремучий лес" as 2 #d0f0d0
+;2: "Вы в дремучем лесу"
+;state "1" as 3
+;3: "Вы пришли в лес"
+;state "2" as 4 #d0f0d0
+;4: "Вы пришли к высокой горе"
+;[*] --> 0
+;1 --> 3 : "иди направо"
+;1 --> 4 : "иди налево"
+;0 -[#aaaaaa,dotted]-> 1 : [auto]
+;3 --> 2 : [goto]
+;@enduml
+
