@@ -9,6 +9,20 @@ import sublime
 import sublime_plugin
 import os, sys
 import subprocess
+import importlib
+
+modules_to_reload = [
+    'URQ_to_PUML.urq_parser',
+    'URQ_to_PUML.plantuml_gen'
+]
+
+for module_name in modules_to_reload:
+    if module_name in sys.modules:
+        importlib.reload(sys.modules[module_name])
+
+# Then your imports
+from .urq_parser import UrqParser
+from .plantuml_gen import PlantumlGen
 
 # Относительные импорты для Sublime Text
 try:

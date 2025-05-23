@@ -6,7 +6,7 @@ import base64
 import zlib
 import urllib.request
 import urllib.error
-
+print("Package name:", os.path.basename(os.path.dirname(__file__)))
 # Лимиты и константы
 LOC_LIMIT = 40
 DESC_LIMIT = 50
@@ -43,6 +43,10 @@ DOUBLE_STATE_FORMAT = 'state "{0}" as {1} {2}'
 STATE_DESC_FORMAT = '{0}: {1}\n'
 LOST_DESC_FORMAT = '{0}: [Дубликат метки, строка {1}]\\n\\n{2}\n'
 PROC_FORMAT = "{0} --> {1} : [proc]\n{1} -[dotted]-> {0}\n"
+
+EMPTY_BTN_FORMAT = "{0} -[#6fb4d4]-> {1}\n"
+PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : {1}\n"
+PHANTOM_EMPTY_FORMAT = "{0} -[#6fb4d4,dotted]-> PHANTOM_NODE_URQ\n"
 
 class PlantumlOnlineGen:
     """Онлайн генератор PlantUML"""
@@ -234,7 +238,7 @@ class PlantumlGen:
         except Exception as e:
             self._add_warning("Онлайн ошибка {}: {}".format(file_type.upper(), e))
             return False
-
+            
     def _add_links(self, links, name_to_id, all_locs, id_to_name, format_str, link_type):
         """Универсальный метод добавления связей"""
         parts = []
@@ -243,13 +247,20 @@ class PlantumlGen:
             
             if target_id is not None:
                 if link_type == "btn":
-                    clean_label = self._limit_text(label, BTN_LIMIT)
-                    parts.append(format_str.format(source_id, target_id, clean_label))
+                    if label == "":  # Совсем пустая - синяя стрелка без текста
+                        parts.append(EMPTY_BTN_FORMAT.format(source_id, target_id))
+                    else:  # Есть текст (включая пробелы) - обычная стрелка
+                        clean_label = self._limit_text(label, BTN_LIMIT)
+                        parts.append(format_str.format(source_id, target_id, clean_label))
                 else:  # goto
                     parts.append(format_str.format(source_id, target_id, link_type))
             else:
-                phantom_label = self._limit_text(label if link_type == "btn" else target, BTN_LIMIT)
-                parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
+                phantom_label = self._limit_text(label if link_type == "btn" and label else target, BTN_LIMIT)
+                # Use appropriate phantom format based on label content
+                if phantom_label == "":
+                    parts.append(PHANTOM_EMPTY_FORMAT.format(source_id))
+                else:
+                    parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
                 loc_name = id_to_name.get(source_id, "неизвестная")
                 self._add_warning("Локация '{}' для {} из '{}' не найдена".format(target, link_type, loc_name))
         return ''.join(parts)

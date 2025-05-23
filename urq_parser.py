@@ -2,7 +2,7 @@
 # URQ Parser - извлекает структуру из URQ файлов
 import re
 import os
-
+print("Package name:", os.path.basename(os.path.dirname(__file__)))
 # Регулярки для парсинга URQ
 LOC_PATTERN = re.compile(r'^\s*:([^\n]+)', re.MULTILINE)
 END_PATTERN = re.compile(r'^\s*\bend\b', re.MULTILINE | re.IGNORECASE)
@@ -16,7 +16,8 @@ PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE
 
 # Регулярка для инлайн кнопок в pln/p тексте
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
-PLN_CONTENT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
+# И для текста в pln/p
+PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
 
 class UrqParser:
     def __init__(self):
@@ -151,23 +152,22 @@ class UrqParser:
 
     def _extract_description(self, content: str) -> str:
         parts = []
-        for line in content.splitlines():
-           line = line.strip()
+        for raw_line in content.splitlines():
+           line = raw_line.strip() 
            
-           extracted_text = None 
-           if line.startswith("pln "):
-               extracted_text = line[len("pln "):].strip()
-           elif line.startswith("p "):
-               extracted_text = line[len("p "):].strip() 
-           
-           if extracted_text is not None: # Only process if text was extracted
+           match = PLN_TEXT_EXTRACTOR.match(line)
+           if match:
+               # group(1) contains the text after "pln " or "p "
+               extracted_text = match.group(1).strip()
+               
                processed_text = self._process_text_with_buttons(extracted_text).strip()
-               if processed_text: 
+               if processed_text: # If not empty after all processing
                    parts.append(processed_text)
+           # If no match, the line is not a pln/p line we care about, so it's skipped.
            
         if not parts:
            return "Нет описания"
-
+           
         return self._clean_final_text(' '.join(parts))
        
     def _process_text_with_buttons(self, text):
@@ -221,12 +221,18 @@ class UrqParser:
 
         # btn
         for match in BTN_PATTERN.finditer(content):
-            target, label = match.group(1).strip(), match.group(2).strip()
+            target = match.group(1).strip()  
+            label = match.group(2)  # Don't strip to preserve distinction
             if target:
                 if target == loc_name:
                     cycle_ids.add(loc_id)
-                # Очищаем label от инлайн кнопок и лишних символов
-                clean_label = self._clean_button_text(label)
+                # Only truly empty (no characters) should be blue
+                if label == "":
+                    clean_label = ""  # Blue arrow
+                elif label.strip() == "":
+                    clean_label = " "  # Normal arrow with space caption  
+                else:
+                    clean_label = self._clean_button_text(label.strip())
                 btn_links.append((loc_id, target, clean_label))
             else:
                 self._add_warning("Пустая цель btn из '{}', кнопка '{}'".format(loc_name, label))
@@ -257,30 +263,32 @@ class UrqParser:
             desc = match.group(1) if match.group(1) is not None else ""
             target = match.group(2) if match.group(2) is not None else desc
                 
-            # Если описание пустое или только пробелы
-            if not desc.strip():
-                if desc:  # Есть пробелы
-                    safe_desc = "' '"
-                else:  # Совсем пустое
-                    safe_desc = "[empty]"
-            else:
-                safe_desc = self._clean_button_text(desc.strip())
+            # Strip desc for empty button detection
+            desc_stripped = desc.strip() if desc else ""
             
-            # Если цель не указана, используем описание как цель
-            if not target.strip() and desc.strip():
-                target = desc.strip()
-            elif not target.strip():
-                continue  # Пропускаем пустые кнопки
+            # Preserve empty desc as empty string for blue arrow
+            if desc_stripped == "":
+                safe_desc = ""
+            else:
+                safe_desc = self._clean_button_text(desc_stripped)
+            
+            # Strip target for processing, but keep original logic
+            target_stripped = target.strip() if target else ""
+            
+            # If no explicit target was provided, use desc as target
+            if match.group(2) is None:
+                target_stripped = desc_stripped
                 
-            if target.strip() == loc_name:
+            # Check for self-reference only if target is not empty
+            if target_stripped and target_stripped == loc_name:
                 cycle_ids.add(loc_id)
             
-            btn_links.append((loc_id, target.strip(), safe_desc))
-
+            btn_links.append((loc_id, target_stripped, safe_desc))
+            
     def _clean_button_text(self, text):
         """Очищает текст кнопки"""
         if not text:
-            return "[empty]"
+            return ""
         
         # Удаляем инлайн кнопки из текста кнопки (рекурсивно)
         text = self._process_text_with_buttons(text)
@@ -288,7 +296,7 @@ class UrqParser:
         # Заменяем кавычки
         text = text.replace('"', "''").strip()
         
-        return text if text else "[empty]"
+        return text
 
     def _add_warning(self, message):
         """Добавляет предупреждение"""
