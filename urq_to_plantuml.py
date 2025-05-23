@@ -44,22 +44,26 @@ END_COLOR = "#d0f0d0"  # Зеленый для концовок
 START_LOC = "[*] --> 0\n"
 
 # Шаблоны форматирования - чтобы не писать одно и то же
-AUTO_FORMAT = "{0} -[#CD5C5C,dotted]-> {1}\n"
+
+AUTO_FORMAT = "{0} -[dotted]-> {1}\n"
 PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : [{1}]\n"
-BTN_FORMAT = "{0} --> {1} : {2}\n"
+BTN_FORMAT = "{0} --> {1} : {2}\n" 
 GOTO_FORMAT = "{0} --> {1} : [{2}]\n"
 STATE_FORMAT = 'state "{0}" as {1}'
-LOST_STATE_FORMAT = 'state "{0}" as {1} {2}'
+DOUBLE_STATE_FORMAT = 'state "{0}" as {1} {2}'
 STATE_DESC_FORMAT = '{0}: {1}\n'
 LOST_DESC_FORMAT = '{0}: [Дубликат метки, строка {1}]\\n\\n{2}\n'
+PROC_FORMAT = "{1} --> {0} : [proc]\n{0} -[dotted]-> {1}\n"  # стелка туда и обратно для proc
 
 # Кэшированные регулярки - компилируем один раз, используем много
 LOC_PATTERN = re.compile(r'^\s*:([^\n]+)', re.MULTILINE)
 END_PATTERN = re.compile(r'^\s*\bend\b', re.MULTILINE | re.IGNORECASE)
 GOTO_PATTERN = re.compile(r'^\s*\bgoto\b', re.MULTILINE | re.IGNORECASE)
+PROC_PATTERN = re.compile(r'^\s*\bproc\b', re.MULTILINE | re.IGNORECASE)
 PLN_PATTERN = re.compile(r'pln\s+([^.\n]+)')
 BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', re.MULTILINE | re.IGNORECASE)
 GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.MULTILINE | re.IGNORECASE)
+PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE)
 PLN_NEWLINE_PATTERN = re.compile(r'[\s\t]*\n[\s\t]*pln\b', re.IGNORECASE) # для удаления \n*pln
 
 class PlantumlGenerator:
@@ -125,11 +129,11 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             if not result:
                 return
             
-            locs, all_locs, btn_links, auto_links, goto_links, cycle_ids = result
+            locs, all_locs, btn_links, auto_links, goto_links, proc_links, cycle_ids = result
 
             # Генерируем PlantUML
             puml_file = os.path.splitext(current_file)[0] + '.puml'
-            puml_content = self._generate_plantuml(locs, all_locs, btn_links, auto_links, goto_links, cycle_ids, puml_file)
+            puml_content = self._generate_plantuml(locs, all_locs, btn_links, auto_links, goto_links, proc_links, cycle_ids, puml_file)
             
             if os.path.exists(puml_file):
                 # !!! не открывать лишний раз puml файл
@@ -160,11 +164,10 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                     if svg_success:
                         status_parts.append(".svg файл создан" + (" онлайн" if net else ""))
                         
-                        # Показываем диалог для открытия SVG файла
                         svg_file_path = os.path.splitext(puml_file)[0] + '.svg'
-                        if sublime.yes_no_cancel_dialog("Вы хотите открыть svg файл в программе по умолчанию?") == sublime.DIALOG_YES:
-                            if not self._open_file_in_default_program(svg_file_path):
-                                sublime.error_message("Не удалось открыть SVG файл в программе по умолчанию")
+                        # if sublime.yes_no_cancel_dialog("Вы хотите открыть svg файл в программе по умолчанию?") == sublime.DIALOG_YES:
+                        if not self._open_file_in_default_program(svg_file_path):
+                            sublime.error_message("Не удалось открыть SVG файл в программе по умолчанию")
                     else:
                         status_parts.append(".svg не создан (см. предупреждения)")
 
@@ -179,6 +182,39 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         finally:
             self._print_warnings()
 
+
+    def _prep_content(self, content):
+        """Предобработка контента: удаление комментариев, объединение строк, токенизация"""
+        # 1. Удаляем /* */ комментарии (C-style)
+        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        
+        # 2. Удаляем ; комментарии (до конца строки)
+        content = re.sub(r';[^\n]*', '', content)
+        
+        # 3. Объединяем строки: удаляем \n + пробелы/табы + _
+        content = re.sub(r'\n\s*_', '', content)
+        
+        # 4. Разбиваем if/then/else конструкции ДО разбивки по &
+        lines = []
+        for line in content.split('\n'):
+            if re.match(r'^\s*if\b', line, re.IGNORECASE):
+                # Разбиваем по 'then' и 'else', сохраняем части
+                parts = re.split(r'\b(then|else)\b', line, flags=re.IGNORECASE)
+                for part in parts:
+                    part = part.strip()
+                    if part and part.lower() not in ('then', 'else'):
+                        lines.append(part)
+            else:
+                lines.append(line)
+        
+        content = '\n'.join(lines)
+        
+        # 5. Наконец разбиваем по & и очищаем
+        parts = content.split('&')
+        content = '\n'.join(part.strip() for part in parts if part.strip())
+        
+        return content
+
     def _parse_urq_file(self, file_path):
         """Парсит URQ файл и извлекает локации и связи"""
         # Сначала читаем файл с определением кодировки
@@ -189,6 +225,9 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         content = self._read_file_with_encoding(file_path, encoding)
         if not content:
             return None
+
+        # Предобрабатываем контент
+        content = self._prep_content(content)
 
         # Ищем все метки локаций
         matches = list(LOC_PATTERN.finditer(content))
@@ -202,6 +241,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         btn_links = []
         auto_links = []
         goto_links = []
+        proc_links = []
         cycle_ids = set()  # ID локаций с циклами
         loc_counter = 0
         name_counts = {}  # Счетчик дубликатов
@@ -231,10 +271,11 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             
             # Определяем следующую локацию по ID, не по имени
             next_loc_id = str(loc_counter + 1) if i + 1 < len(matches) else None
-            self._extract_links(name, loc_content, btn_links, auto_links, goto_links, loc_id, next_loc_id, cycle_ids)
+            self._extract_links(name, loc_content, btn_links, auto_links, goto_links, proc_links, loc_id, next_loc_id, cycle_ids)
             loc_counter += 1
 
-        return locs, all_locs, btn_links, auto_links, goto_links, cycle_ids
+        return locs, all_locs, btn_links, auto_links, goto_links, proc_links, cycle_ids
+
 
     def _detect_encoding(self, file_path):
         """Определяет кодировку файла, читая небольшую порцию"""
@@ -245,7 +286,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         try:
             # Читаем первые 1024 байта для определения кодировки
             with open(file_path, 'rb') as f:
-                sample = f.read(1024)
+                sample = f.read(8)
             
             # Пробуем UTF-8
             try:
@@ -282,13 +323,14 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         pln_match = PLN_PATTERN.search(content)
         return pln_match.group(1).strip() if pln_match else "Нет описания"
 
-    def _extract_links(self, loc_name, content, btn_links, auto_links, goto_links, loc_id, next_loc_id, cycle_ids):
+    def _extract_links(self, loc_name, content, btn_links, auto_links, goto_links, proc_links, loc_id, next_loc_id, cycle_ids):
         """Извлекает все типы связей из локации"""
         has_end = END_PATTERN.search(content)
         has_goto = GOTO_PATTERN.search(content)
+        has_proc = PROC_PATTERN.search(content)
         
-        # Автосвязь к следующей локации если нет end/goto
-        if not has_end and not has_goto and next_loc_id is not None:
+        # Автосвязь к следующей локации если нет end/goto/proc
+        if not has_end and not has_goto and not has_proc and next_loc_id is not None:
             auto_links.append((loc_id, next_loc_id, "auto"))
 
         # Парсим btn команды (кнопки)
@@ -313,7 +355,19 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             else:
                 self._add_warning("Пустая цель goto из '{}'".format(loc_name))
 
-    def _generate_plantuml(self, locs, all_locs, btn_links, auto_links, goto_links, cycle_ids, output_file):
+        # Парсим proc команды (процедуры)
+        for match in PROC_CMD_PATTERN.finditer(content):
+            target = match.group(1).strip()
+            if target:
+                # Проверяем на цикл
+                if target == loc_name:
+                    cycle_ids.add(loc_id)
+                proc_links.append((loc_id, target, "proc"))
+            else:
+                self._add_warning("Пустая цель proc из '{}'".format(loc_name))
+
+
+    def _generate_plantuml(self, locs, all_locs, btn_links, auto_links, goto_links, proc_links, cycle_ids, output_file):
         """Генерирует содержимое PlantUML файла"""
         # Создаем reverse lookup для оптимизации
         id_to_name = {loc_id: name for name, (_, loc_id) in locs.items()}
@@ -321,7 +375,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         
         # Находим исходящие локации для определения конечных
         source_ids = set()
-        for s, _, _ in btn_links + auto_links + goto_links:
+        for s, _, _ in btn_links + auto_links + goto_links + proc_links:
             source_ids.add(s)
         
         # Строим PlantUML эффективно
@@ -347,7 +401,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 clean_name = self._sanitize(name, LOC_LIMIT)
                 clean_desc = self._sanitize(desc, DESC_LIMIT)
                 
-                state_line = LOST_STATE_FORMAT.format(clean_name, loc_id, DOUBLE_COLOR)
+                state_line = DOUBLE_STATE_FORMAT.format(clean_name, loc_id, DOUBLE_COLOR)
                 parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc)])
 
         # Стартовая локация
@@ -359,6 +413,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             self._add_btn_links(btn_links, name_to_id, all_locs, id_to_name),
             self._add_auto_links(auto_links),
             self._add_goto_links(goto_links, name_to_id, all_locs, id_to_name),
+            self._add_proc_links(proc_links, name_to_id, all_locs, id_to_name),
             "@enduml\n"
         ])
         
@@ -373,6 +428,22 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             raise Exception("Ошибка записи файла {}: {}".format(output_file, e))
         
         return content
+
+    def _add_proc_links(self, proc_links, name_to_id, all_locs, id_to_name):
+        """Добавляет связи через proc"""
+        parts = []
+        for source_id, target, _ in proc_links:
+            target_id = self._resolve_target(target, name_to_id, all_locs)
+            
+            if target_id is not None:
+                parts.append(PROC_FORMAT.format(source_id, target_id))
+            else:
+                # Создаем фантомную связь если цель не найдена
+                phantom_label = self._sanitize(target, BTN_LIMIT)
+                parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
+                loc_name = id_to_name.get(source_id, "неизвестная")
+                self._add_warning("Локация '{}' для proc из '{}' не найдена".format(target, loc_name))
+        return ''.join(parts)
 
     def _generate_svg_from_puml(self, puml_file):
         """Генерирует SVG файл из PUML через локальный PlantUML"""
