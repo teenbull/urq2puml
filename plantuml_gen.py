@@ -36,7 +36,7 @@ START_LOC = "[*] --> 0\n"
 
 # Форматы
 AUTO_FORMAT = "{0} -[dotted]-> {1}\n"
-PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : [{1}]\n"
+PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : {1}\n"
 BTN_FORMAT = "{0} --> {1} : {2}\n" 
 GOTO_FORMAT = "{0} --> {1} : [{2}]\n"
 STATE_FORMAT = 'state "{0}" as {1}'
@@ -46,6 +46,7 @@ LOST_DESC_FORMAT = '{0}: [Дубликат метки, строка {1}]\\n\\n{2
 PROC_FORMAT = "{0} --> {1} : [proc]\n{1} -[dotted]-> {0}\n"
 
 PLN_NEWLINE_PATTERN = re.compile(r'[\s\t]*\n[\s\t]*pln\b', re.IGNORECASE)
+INLINE_BTN_STRIP_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
 
 class PlantumlOnlineGen:
     """Онлайн генератор PlantUML"""
@@ -292,12 +293,23 @@ class PlantumlGen:
         
         return None
 
+
     def _sanitize(self, text, max_len=BTN_LIMIT):
-        """Очищает текст"""
+        """Очищает текст и удаляет инлайн кнопки"""
         if not text:
             return ""
         
+        # Удаляем переносы строк с pln
         text = PLN_NEWLINE_PATTERN.sub(' ', text)
+        
+        # Удаляем инлайн кнопки, оставляя только описания
+        def replace_inline_button(match):
+            desc = match.group(1) or ""  # Описание кнопки (может быть None)            
+            
+            # Возвращаем описание с обычной обработкой
+            return desc.strip() if desc.strip() else ""
+        
+        text = INLINE_BTN_STRIP_PATTERN.sub(replace_inline_button, text)
         
         if len(text) > max_len:
             text = text[:max_len].strip() + "..."

@@ -1,8 +1,8 @@
 # Конвертер из URQ в граф PlantUML
-# Плагин для Sublime Text, поддерживает только Python 3.3 (без f-строк)
 
 # Путь к jar файлу с https://plantuml.com/ru/download
 # Если файл не найдет - будет попытка генерить граф онлайн
+
 PLANTUML_JAR_PATH = "C:\\java\\plantuml-1.2025.2.jar"
 
 import sublime

@@ -8,9 +8,13 @@ END_PATTERN = re.compile(r'^\s*\bend\b', re.MULTILINE | re.IGNORECASE)
 GOTO_PATTERN = re.compile(r'^\s*\bgoto\b', re.MULTILINE | re.IGNORECASE)
 PROC_PATTERN = re.compile(r'^\s*\bproc\b', re.MULTILINE | re.IGNORECASE)
 PLN_PATTERN = re.compile(r'pln\s+([^.\n]+)')
+P_PATTERN = re.compile(r'^\s*p\s+([^.\n]+)', re.MULTILINE | re.IGNORECASE)
 BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', re.MULTILINE | re.IGNORECASE)
 GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.MULTILINE | re.IGNORECASE)
 PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE)
+
+# Регулярка для инлайн кнопок в pln/p тексте
+INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]')
 
 class UrqParser:
     def __init__(self):
@@ -144,9 +148,37 @@ class UrqParser:
             return None
 
     def _extract_description(self, content):
-        """Извлекает описание из pln"""
+        """Извлекает описание из pln или p, обрабатывая инлайн кнопки"""
+        # Ищем pln сначала
         pln_match = PLN_PATTERN.search(content)
-        return pln_match.group(1).strip() if pln_match else "Нет описания"
+        if pln_match:
+            return self._strip_inline_buttons(pln_match.group(1).strip())
+        
+        # Потом ищем p
+        p_match = P_PATTERN.search(content)
+        if p_match:
+            return self._strip_inline_buttons(p_match.group(1).strip())
+            
+        return "Нет описания"
+
+    def _strip_inline_buttons(self, text):
+        """Удаляет инлайн кнопки из текста, оставляя только описание"""
+        def replace_button(match):
+            desc = match.group(1)  # Текст кнопки (всегда есть)
+            return desc  # Возвращаем только описание
+        
+        return INLINE_BTN_PATTERN.sub(replace_button, text)
+
+    def _extract_inline_buttons(self, text, loc_name, loc_id, btn_links, cycle_ids):
+        """Извлекает инлайн кнопки из текста pln/p"""
+        for match in INLINE_BTN_PATTERN.finditer(text):
+            desc = match.group(1)  # Описание кнопки
+            link = match.group(2) if match.group(2) else desc  # Ссылка или описание если ссылки нет
+            
+            if link == loc_name:
+                cycle_ids.add(loc_id)
+            
+            btn_links.append((loc_id, link, desc))
 
     def _extract_links(self, loc_name, content, btn_links, auto_links, goto_links, proc_links, loc_id, next_loc_id, cycle_ids):
         """Извлекает связи из локации"""
@@ -155,9 +187,17 @@ class UrqParser:
         has_proc = PROC_PATTERN.search(content)
         
         # Автосвязь (нет end, нет goto, но есть следующая локация)
-        # if not has_end and not has_goto and not has_proc and next_loc_id is not None:
         if not has_end and not has_goto and next_loc_id is not None:
             auto_links.append((loc_id, next_loc_id, "auto"))
+
+        # Обрабатываем инлайн кнопки в pln
+        pln_match = PLN_PATTERN.search(content)
+        if pln_match:
+            self._extract_inline_buttons(pln_match.group(1), loc_name, loc_id, btn_links, cycle_ids)
+
+        # Обрабатываем инлайн кнопки в p
+        for p_match in P_PATTERN.finditer(content):
+            self._extract_inline_buttons(p_match.group(1), loc_name, loc_id, btn_links, cycle_ids)
 
         # btn
         for match in BTN_PATTERN.finditer(content):
@@ -196,3 +236,38 @@ class UrqParser:
     def get_warnings(self):
         """Возвращает список предупреждений"""
         return self.warnings
+
+    def _extract_inline_buttons(self, text, loc_name, loc_id, btn_links, cycle_ids):
+        """Извлекает инлайн кнопки из текста pln/p"""
+        for match in INLINE_BTN_PATTERN.finditer(text):
+            desc = match.group(1) if match.group(1) is not None else ""  # Описание кнопки
+            target = match.group(2) if match.group(2) is not None else desc  # Ссылка или описание если ссылки нет
+            
+            # Если описание пустое или только пробелы, используем безопасное представление
+            if not desc.strip():
+                if desc:  # Есть пробелы
+                    safe_desc = "' '"  # Безопасное представление пробела для PlantUML
+                else:  # Совсем пустое
+                    safe_desc = "[empty]"  # Безопасное представление пустой кнопки
+            else:
+                safe_desc = desc.strip()
+            
+            # Если цель не указана, используем описание как цель
+            if not target.strip() and desc.strip():
+                target = desc.strip()
+            elif not target.strip():
+                # Если и цель и описание пустые, пропускаем эту кнопку
+                continue
+                
+            if target.strip() == loc_name:
+                cycle_ids.add(loc_id)
+            
+            btn_links.append((loc_id, target.strip(), safe_desc))
+
+    def _strip_inline_buttons(self, text):
+        """Удаляет инлайн кнопки из текста, оставляя только описание"""
+        def replace_button(match):
+            desc = match.group(1) if match.group(1) is not None else ""
+            return desc  # Возвращаем описание как есть (может быть пустым или с пробелами)
+        
+        return INLINE_BTN_PATTERN.sub(replace_button, text)        
