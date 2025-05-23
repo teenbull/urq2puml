@@ -160,7 +160,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                         
                         # Показываем диалог для открытия SVG файла
                         svg_file_path = os.path.splitext(puml_file)[0] + '.svg'
-                        if sublime.yes_no_cancel_dialog("Вы хотите открыть svg файл?") == sublime.DIALOG_YES:
+                        if sublime.yes_no_cancel_dialog("Вы хотите открыть svg файл в программе по умолчанию?") == sublime.DIALOG_YES:
                             if not self._open_file_in_default_program(svg_file_path):
                                 sublime.error_message("Не удалось открыть SVG файл в программе по умолчанию")
                     else:
@@ -346,7 +346,9 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         success = self._generate_from_puml(puml_file, 'png', '-tpng')
         if success:
             png_file = os.path.splitext(puml_file)[0] + '.png'
-            self.view.window().open_file(png_file)
+            # self.view.window().open_file(png_file)
+            if not self._open_file_in_default_program(png_file):
+                sublime.error_message("Не удалось открыть PNG файл в программе по умолчанию")
         return success
 
     def _generate_from_puml(self, puml_file, file_type, type_flag):
