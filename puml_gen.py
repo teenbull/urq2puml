@@ -37,8 +37,7 @@ START_LOC = "[*] --> 0\n"
 
 # Форматы
 AUTO_FORMAT = "{0} -[dotted]-> {1}\n"
-PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : {1}\n"
-BTN_FORMAT = "{0} --> {1} : {2}\n" 
+BTN_FORMAT = "{0} --> {1} : ({2})\n" 
 GOTO_FORMAT = "{0} --> {1} : [{2}]\n"
 STATE_FORMAT = 'state "{0}" as {1}'
 DOUBLE_STATE_FORMAT = 'state "{0}" as {1} {2}'
@@ -47,7 +46,7 @@ LOST_DESC_FORMAT = '{0}: [Дубликат метки, строка {1}]\\n\\n{2
 PROC_FORMAT = "{0} --> {1} : [proc]\n{1} -[dotted]-> {0}\n"
 
 EMPTY_BTN_FORMAT = "{0} -[#6fb4d4]-> {1}\n"
-PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : {1}\n"
+PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : ({1})\n"
 PHANTOM_EMPTY_FORMAT = "{0} -[#6fb4d4,dotted]-> PHANTOM_NODE_URQ\n"
 # ----------------------------------------------------------------------
 
