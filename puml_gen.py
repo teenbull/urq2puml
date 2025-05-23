@@ -104,8 +104,11 @@ class PlantumlGen:
         for s, _, _ in btn_links + auto_links + goto_links + proc_links:
             source_ids.add(s)
         
-        # Строим PlantUML
-        parts = ["@startuml\n", PHANTOM_NODE, SKIN_PARAMS]
+        # Флаг для phantom связей
+        self.has_phantom_links = False
+        
+        # Генерируем основное содержимое диаграммы
+        content_parts = []
         
         # Основные локации
         for name, (desc, loc_id) in sorted(locs.items(), key=lambda x: int(x[1][1])):
@@ -118,7 +121,7 @@ class PlantumlGen:
             elif loc_id not in source_ids:
                 state_line += " {}".format(END_COLOR)
             
-            parts.extend([state_line + "\n", STATE_DESC_FORMAT.format(loc_id, clean_desc)])
+            content_parts.extend([state_line + "\n", STATE_DESC_FORMAT.format(loc_id, clean_desc)])
 
         # Дубликаты
         for loc_id, (name, desc, line_num, is_duplicate) in all_locs.items():
@@ -127,22 +130,32 @@ class PlantumlGen:
                 clean_desc = self._limit_text(desc, DESC_LIMIT)
                 
                 state_line = DOUBLE_STATE_FORMAT.format(clean_name, loc_id, DOUBLE_COLOR)
-                parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc)])
+                content_parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc)])
 
         # Стартовая локация
         if any(loc_id == '0' for _, (_, loc_id) in locs.items()) or '0' in all_locs:
-            parts.append(START_LOC)
+            content_parts.append(START_LOC)
 
-        # Связи
-        parts.extend([
+        # Связи (здесь устанавливается флаг has_phantom_links)
+        content_parts.extend([
             self._add_links(btn_links, name_to_id, all_locs, id_to_name, BTN_FORMAT, "btn"),
             self._add_auto_links(auto_links),
             self._add_links(goto_links, name_to_id, all_locs, id_to_name, GOTO_FORMAT, "goto"),
-            self._add_proc_links(proc_links, name_to_id, all_locs, id_to_name),
-            "@enduml\n"
+            self._add_proc_links(proc_links, name_to_id, all_locs, id_to_name)
         ])
         
-        content = ''.join(parts)
+        # Строим финальную структуру PlantUML
+        final_parts = ["@startuml\n"]
+        
+        # Добавляем phantom node только если есть phantom связи
+        if self.has_phantom_links:
+            final_parts.append(PHANTOM_NODE)
+        
+        final_parts.append(SKIN_PARAMS)
+        final_parts.extend(content_parts)
+        final_parts.append("@enduml\n")
+        
+        content = ''.join(final_parts)
         
         # Записываем файл
         try:
@@ -258,6 +271,7 @@ class PlantumlGen:
                 else:  # goto
                     parts.append(format_str.format(source_id, target_id, link_type))
             else:
+                self.has_phantom_links = True  # Устанавливаем флаг
                 phantom_label = self._limit_text(label if link_type == "btn" and label else target, BTN_LIMIT)
                 # Use appropriate phantom format based on label content
                 if phantom_label == "":
@@ -284,6 +298,7 @@ class PlantumlGen:
             if target_id is not None:
                 parts.append(PROC_FORMAT.format(source_id, target_id))
             else:
+                self.has_phantom_links = True  # Устанавливаем флаг
                 phantom_label = self._limit_text(target, BTN_LIMIT)
                 parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
                 loc_name = id_to_name.get(source_id, "неизвестная")
