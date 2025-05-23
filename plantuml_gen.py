@@ -6,7 +6,6 @@ import base64
 import zlib
 import urllib.request
 import urllib.error
-import re
 
 # Лимиты и константы
 LOC_LIMIT = 40
@@ -44,9 +43,6 @@ DOUBLE_STATE_FORMAT = 'state "{0}" as {1} {2}'
 STATE_DESC_FORMAT = '{0}: {1}\n'
 LOST_DESC_FORMAT = '{0}: [Дубликат метки, строка {1}]\\n\\n{2}\n'
 PROC_FORMAT = "{0} --> {1} : [proc]\n{1} -[dotted]-> {0}\n"
-
-PLN_NEWLINE_PATTERN = re.compile(r'[\s\t]*\n[\s\t]*pln\b', re.IGNORECASE)
-INLINE_BTN_STRIP_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
 
 class PlantumlOnlineGen:
     """Онлайн генератор PlantUML"""
@@ -106,8 +102,8 @@ class PlantumlGen:
         
         # Основные локации
         for name, (desc, loc_id) in sorted(locs.items(), key=lambda x: int(x[1][1])):
-            clean_name = self._sanitize(name, LOC_LIMIT)
-            clean_desc = self._sanitize(desc, DESC_LIMIT)
+            clean_name = self._limit_text(name, LOC_LIMIT)
+            clean_desc = self._limit_text(desc, DESC_LIMIT)
             
             state_line = STATE_FORMAT.format(clean_name, loc_id)
             if loc_id in cycle_ids:
@@ -120,8 +116,8 @@ class PlantumlGen:
         # Дубликаты
         for loc_id, (name, desc, line_num, is_duplicate) in all_locs.items():
             if is_duplicate:
-                clean_name = self._sanitize(name, LOC_LIMIT)
-                clean_desc = self._sanitize(desc, DESC_LIMIT)
+                clean_name = self._limit_text(name, LOC_LIMIT)
+                clean_desc = self._limit_text(desc, DESC_LIMIT)
                 
                 state_line = DOUBLE_STATE_FORMAT.format(clean_name, loc_id, DOUBLE_COLOR)
                 parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc)])
@@ -247,12 +243,12 @@ class PlantumlGen:
             
             if target_id is not None:
                 if link_type == "btn":
-                    clean_label = self._sanitize(label, BTN_LIMIT)
+                    clean_label = self._limit_text(label, BTN_LIMIT)
                     parts.append(format_str.format(source_id, target_id, clean_label))
                 else:  # goto
                     parts.append(format_str.format(source_id, target_id, link_type))
             else:
-                phantom_label = self._sanitize(label if link_type == "btn" else target, BTN_LIMIT)
+                phantom_label = self._limit_text(label if link_type == "btn" else target, BTN_LIMIT)
                 parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
                 loc_name = id_to_name.get(source_id, "неизвестная")
                 self._add_warning("Локация '{}' для {} из '{}' не найдена".format(target, link_type, loc_name))
@@ -274,7 +270,7 @@ class PlantumlGen:
             if target_id is not None:
                 parts.append(PROC_FORMAT.format(source_id, target_id))
             else:
-                phantom_label = self._sanitize(target, BTN_LIMIT)
+                phantom_label = self._limit_text(target, BTN_LIMIT)
                 parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
                 loc_name = id_to_name.get(source_id, "неизвестная")
                 self._add_warning("Локация '{}' для proc из '{}' не найдена".format(target, loc_name))
@@ -293,28 +289,15 @@ class PlantumlGen:
         
         return None
 
-
-    def _sanitize(self, text, max_len=BTN_LIMIT):
-        """Очищает текст и удаляет инлайн кнопки"""
+    def _limit_text(self, text, max_len):
+        """Ограничивает длину текста для диаграммы"""
         if not text:
             return ""
         
-        # Удаляем переносы строк с pln
-        text = PLN_NEWLINE_PATTERN.sub(' ', text)
-        
-        # Удаляем инлайн кнопки, оставляя только описания
-        def replace_inline_button(match):
-            desc = match.group(1) or ""  # Описание кнопки (может быть None)            
-            
-            # Возвращаем описание с обычной обработкой
-            return desc.strip() if desc.strip() else ""
-        
-        text = INLINE_BTN_STRIP_PATTERN.sub(replace_inline_button, text)
-        
         if len(text) > max_len:
-            text = text[:max_len].strip() + "..."
-
-        return text.replace('"', "''")
+            return text[:max_len].strip() + "..."
+        
+        return text
 
     def _add_warning(self, message):
         """Добавляет предупреждение"""
