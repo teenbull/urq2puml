@@ -38,8 +38,9 @@ skinparam state {
 """
 
 # Цвета для разных типов состояний
-END_COLOR = "#d0f0d0"  # Зеленый для конецовок
-LOST_COLOR = "#ffcccb"  # Красный для дубликатов и фантомов
+CYCLE_COLOR = "#ffffcc"  # Желтый для зацикленных локаций
+DOUBLE_COLOR = "#ffcccb"  # Красный для дубликатов и фантомов
+END_COLOR = "#d0f0d0"  # Зеленый для концовок
 START_LOC = "[*] --> 0\n"
 
 # Шаблоны форматирования - чтобы не писать одно и то же
@@ -120,14 +121,15 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
         try:
             # Парсим URQ файл
-            locs, all_locs, links, auto_links, goto_links = self._parse_urq_file(current_file)
-            
-            if not locs:
+            result = self._parse_urq_file(current_file)
+            if not result:
                 return
+            
+            locs, all_locs, btn_links, auto_links, goto_links, cycle_ids = result
 
             # Генерируем PlantUML
             puml_file = os.path.splitext(current_file)[0] + '.puml'
-            puml_content = self._generate_plantuml(locs, all_locs, links, auto_links, goto_links, puml_file)
+            puml_content = self._generate_plantuml(locs, all_locs, btn_links, auto_links, goto_links, cycle_ids, puml_file)
             
             if os.path.exists(puml_file):
                 # !!! не открывать лишний раз puml файл
@@ -179,20 +181,28 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
     def _parse_urq_file(self, file_path):
         """Парсит URQ файл и извлекает локации и связи"""
-        content = self._read_file(file_path)
+        # Сначала читаем файл с определением кодировки
+        encoding = self._detect_encoding(file_path)
+        if not encoding:
+            return None
+            
+        content = self._read_file_with_encoding(file_path, encoding)
         if not content:
-            return {}, {}, [], [], []
+            return None
 
         # Ищем все метки локаций
         matches = list(LOC_PATTERN.finditer(content))
         
         if not matches:
             self._add_warning("В файле {} не найдено ни одной метки".format(os.path.basename(file_path)))
-            return {}, {}, [], [], []
+            return None
 
         locs = {}  # Основные локации {name: [desc, id]}
         all_locs = {}  # Все локации включая дубликаты {id: [name, desc, line_num, is_duplicate]}
-        links = []
+        btn_links = []
+        auto_links = []
+        goto_links = []
+        cycle_ids = set()  # ID локаций с циклами
         loc_counter = 0
         name_counts = {}  # Счетчик дубликатов
         
@@ -221,34 +231,48 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             
             # Определяем следующую локацию по ID, не по имени
             next_loc_id = str(loc_counter + 1) if i + 1 < len(matches) else None
-            self._extract_links(name, loc_content, links, loc_id, next_loc_id)
+            self._extract_links(name, loc_content, btn_links, auto_links, goto_links, loc_id, next_loc_id, cycle_ids)
             loc_counter += 1
 
-        # Разделяем типы связей для разного форматирования
-        btn_links = [(s, t, l) for s, t, l, typ in links if typ == "btn"]
-        auto_links = [(s, t, l) for s, t, l, typ in links if typ == "auto"]
-        goto_links = [(s, t, l) for s, t, l, typ in links if typ == "goto"]
-        
-        return locs, all_locs, btn_links, auto_links, goto_links
+        return locs, all_locs, btn_links, auto_links, goto_links, cycle_ids
 
-    def _read_file(self, file_path):
-        """Читает файл с попыткой определить кодировку"""
+    def _detect_encoding(self, file_path):
+        """Определяет кодировку файла, читая небольшую порцию"""
         if not os.path.exists(file_path):
             self._add_warning("Файл не найден: {}".format(file_path))
             return None
-            
+        
         try:
-            # Сначала пробуем UTF-8
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except UnicodeDecodeError:
+            # Читаем первые 1024 байта для определения кодировки
+            with open(file_path, 'rb') as f:
+                sample = f.read(1024)
+            
+            # Пробуем UTF-8
             try:
-                # Потом CP1251 (старая русская кодировка)
-                with open(file_path, 'r', encoding='cp1251') as f:
-                    return f.read()
+                sample.decode('utf-8')
+                return 'utf-8'
             except UnicodeDecodeError:
-                self._add_warning("Не удалось определить кодировку файла {}".format(os.path.basename(file_path)))
-                return None
+                pass
+            
+            # Пробуем CP1251
+            try:
+                sample.decode('cp1251')
+                return 'cp1251'
+            except UnicodeDecodeError:
+                pass
+            
+            self._add_warning("Не удалось определить кодировку файла {}".format(os.path.basename(file_path)))
+            return None
+            
+        except IOError as e:
+            self._add_warning("Ошибка чтения файла {}: {}".format(os.path.basename(file_path), e))
+            return None
+
+    def _read_file_with_encoding(self, file_path, encoding):
+        """Читает файл с указанной кодировкой"""
+        try:
+            with open(file_path, 'r', encoding=encoding) as f:
+                return f.read()
         except IOError as e:
             self._add_warning("Ошибка чтения файла {}: {}".format(os.path.basename(file_path), e))
             return None
@@ -258,20 +282,23 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         pln_match = PLN_PATTERN.search(content)
         return pln_match.group(1).strip() if pln_match else "Нет описания"
 
-    def _extract_links(self, loc_name, content, links, loc_id, next_loc_id):
+    def _extract_links(self, loc_name, content, btn_links, auto_links, goto_links, loc_id, next_loc_id, cycle_ids):
         """Извлекает все типы связей из локации"""
         has_end = END_PATTERN.search(content)
         has_goto = GOTO_PATTERN.search(content)
         
         # Автосвязь к следующей локации если нет end/goto
         if not has_end and not has_goto and next_loc_id is not None:
-            links.append((loc_id, next_loc_id, "auto", "auto"))
+            auto_links.append((loc_id, next_loc_id, "auto"))
 
         # Парсим btn команды (кнопки)
         for match in BTN_PATTERN.finditer(content):
             target, label = match.group(1).strip(), match.group(2).strip()
             if target:
-                links.append((loc_id, target, label, "btn"))
+                # Проверяем на цикл
+                if target == loc_name:
+                    cycle_ids.add(loc_id)
+                btn_links.append((loc_id, target, label))
             else:
                 self._add_warning("Пустая цель btn из '{}', кнопка '{}'".format(loc_name, label))
 
@@ -279,18 +306,26 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         for match in GOTO_CMD_PATTERN.finditer(content):
             target = match.group(1).strip()
             if target:
-                links.append((loc_id, target, "goto", "goto"))
+                # Проверяем на цикл
+                if target == loc_name:
+                    cycle_ids.add(loc_id)
+                goto_links.append((loc_id, target, "goto"))
             else:
                 self._add_warning("Пустая цель goto из '{}'".format(loc_name))
 
-    def _generate_plantuml(self, locs, all_locs, btn_links, auto_links, goto_links, output_file):
+    def _generate_plantuml(self, locs, all_locs, btn_links, auto_links, goto_links, cycle_ids, output_file):
         """Генерирует содержимое PlantUML файла"""
-        parts = ["@startuml\n", PHANTOM_NODE, SKIN_PARAMS]
+        # Создаем reverse lookup для оптимизации
+        id_to_name = {loc_id: name for name, (_, loc_id) in locs.items()}
+        name_to_id = {name: loc_id for name, (_, loc_id) in locs.items()}
         
         # Находим исходящие локации для определения конечных
         source_ids = set()
         for s, _, _ in btn_links + auto_links + goto_links:
             source_ids.add(s)
+        
+        # Строим PlantUML эффективно
+        parts = ["@startuml\n", PHANTOM_NODE, SKIN_PARAMS]
         
         # Генерируем основные локации
         for name, (desc, loc_id) in sorted(locs.items(), key=lambda x: int(x[1][1])):
@@ -298,12 +333,13 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             clean_desc = self._sanitize(desc, DESC_LIMIT)
             
             state_line = STATE_FORMAT.format(clean_name, loc_id)
-            # Конечные локации подкрашиваем зеленым
-            if loc_id not in source_ids:
+            # Определяем цвет: цикл > конечная локация
+            if loc_id in cycle_ids:
+                state_line += " {}".format(CYCLE_COLOR)
+            elif loc_id not in source_ids:
                 state_line += " {}".format(END_COLOR)
             
-            parts.append(state_line + "\n")
-            parts.append(STATE_DESC_FORMAT.format(loc_id, clean_desc))
+            parts.extend([state_line + "\n", STATE_DESC_FORMAT.format(loc_id, clean_desc)])
 
         # Генерируем дубликаты локаций (красные)
         for loc_id, (name, desc, line_num, is_duplicate) in all_locs.items():
@@ -311,19 +347,20 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 clean_name = self._sanitize(name, LOC_LIMIT)
                 clean_desc = self._sanitize(desc, DESC_LIMIT)
                 
-                state_line = LOST_STATE_FORMAT.format(clean_name, loc_id, LOST_COLOR)
-                parts.append(state_line + "\n")
-                parts.append(LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc))
+                state_line = LOST_STATE_FORMAT.format(clean_name, loc_id, DOUBLE_COLOR)
+                parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc)])
 
         # Стартовая локация
         if any(loc_id == '0' for _, (_, loc_id) in locs.items()) or '0' in all_locs:
             parts.append(START_LOC)
 
         # Добавляем все типы связей
-        parts.append(self._add_btn_links(btn_links, locs, all_locs))
-        parts.append(self._add_auto_links(auto_links, locs, all_locs))
-        parts.append(self._add_goto_links(goto_links, locs, all_locs))
-        parts.append("@enduml\n")
+        parts.extend([
+            self._add_btn_links(btn_links, name_to_id, all_locs, id_to_name),
+            self._add_auto_links(auto_links),
+            self._add_goto_links(goto_links, name_to_id, all_locs, id_to_name),
+            "@enduml\n"
+        ])
         
         content = ''.join(parts)
         
@@ -435,18 +472,19 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             
             print("URQ to PlantUML: {} файл создан онлайн: {}".format(file_type.upper(), output_file))
             if open_file:
-                self.view.window().open_file(output_file)
+                # self.view.window().open_file(output_file)
+                self._open_file_in_default_program(output_file)
             return True
             
         except Exception as e:
             self._add_warning("Ошибка создания {} онлайн: {}".format(file_type.upper(), e))
             return False
 
-    def _add_btn_links(self, links, locs, all_locs):
+    def _add_btn_links(self, links, name_to_id, all_locs, id_to_name):
         """Добавляет связи через кнопки"""
         parts = []
         for source_id, target, label in links:
-            target_id = self._resolve_target(target, locs, all_locs)
+            target_id = self._resolve_target(target, name_to_id, all_locs)
             
             if target_id is not None:
                 clean_label = self._sanitize(label, BTN_LIMIT)
@@ -455,10 +493,11 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 # Создаем фантомную связь если цель не найдена
                 phantom_label = self._sanitize(label, BTN_LIMIT)
                 parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
-                self._add_warning("Локация '{}' для btn из '{}' не найдена".format(target, self._get_loc_name_by_id(source_id, locs, all_locs)))
+                loc_name = id_to_name.get(source_id, "неизвестная")
+                self._add_warning("Локация '{}' для btn из '{}' не найдена".format(target, loc_name))
         return ''.join(parts)
 
-    def _add_auto_links(self, auto_links, locs, all_locs):
+    def _add_auto_links(self, auto_links):
         """Добавляет автоматические связи"""
         parts = []
         for source_id, target_id, _ in auto_links:
@@ -466,11 +505,11 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             parts.append(AUTO_FORMAT.format(source_id, target_id))
         return ''.join(parts)
 
-    def _add_goto_links(self, goto_links, locs, all_locs):
+    def _add_goto_links(self, goto_links, name_to_id, all_locs, id_to_name):
         """Добавляет связи через goto"""
         parts = []
         for source_id, target, _ in goto_links:
-            target_id = self._resolve_target(target, locs, all_locs)
+            target_id = self._resolve_target(target, name_to_id, all_locs)
             
             if target_id is not None:
                 parts.append(GOTO_FORMAT.format(source_id, target_id, "goto"))
@@ -478,14 +517,15 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 # Создаем фантомную связь если цель не найдена
                 phantom_label = self._sanitize(target, BTN_LIMIT)
                 parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
-                self._add_warning("Локация '{}' для goto из '{}' не найдена".format(target, self._get_loc_name_by_id(source_id, locs, all_locs)))
+                loc_name = id_to_name.get(source_id, "неизвестная")
+                self._add_warning("Локация '{}' для goto из '{}' не найдена".format(target, loc_name))
         return ''.join(parts)
 
-    def _resolve_target(self, target_name, locs, all_locs):
+    def _resolve_target(self, target_name, name_to_id, all_locs):
         """Находит ID целевой локации по имени (приоритет основным локациям)"""
         # Сначала ищем в основных локациях
-        if target_name in locs:
-            return locs[target_name][1]
+        if target_name in name_to_id:
+            return name_to_id[target_name]
         
         # Потом среди дубликатов
         for loc_id, (name, _, _, is_duplicate) in all_locs.items():
@@ -493,19 +533,6 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 return loc_id
         
         return None
-
-    def _get_loc_name_by_id(self, loc_id, locs, all_locs):
-        """Получает имя локации по ID (для сообщений об ошибках)"""
-        # Ищем в основных локациях
-        for name, (_, stored_id) in locs.items():
-            if stored_id == loc_id:
-                return name
-        
-        # Ищем среди всех локаций
-        if loc_id in all_locs:
-            return all_locs[loc_id][0]
-        
-        return "неизвестная"
 
     def _open_file_in_default_program(self, file_path):
         """Открывает файл в программе по умолчанию"""
