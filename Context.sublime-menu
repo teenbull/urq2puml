@@ -6,7 +6,7 @@
         "caption": "URQ to PlantUML",
         "children": [
             {
-                "caption": "Конвертировать в граф PlantUML",
+                "caption": "Конвертировать в код puml",
                 "command": "urq_to_plantuml",
             },
             {
