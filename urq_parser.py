@@ -28,35 +28,39 @@ class Loc:
         self.dup = False
         self.cycle = False
         self.end = False
-        self.links = []  # [(target, type, label, is_phantom)]
+        self.links = []  # [(target_id, target_name, type, label, is_phantom)]
 
 class UrqParser:
     def __init__(self):
         self.warnings = []
     
     def parse_file(self, file_path):
-        """Парсит URQ файл и возвращает структуру"""
-        encoding = self._detect_encoding(file_path)
-        if not encoding:
-            return [], {}
+        """Парсит URQ файл и возвращает структуру"""        
             
-        content = self._read_file_with_encoding(file_path, encoding)
+        content = self._read_file(file_path)
         if not content:
-            return [], {}
+            return []
 
+        # Препроцессинг: разбиваем файл на токены
         content = self._prep_content(content)
-        matches = list(LOC_PATTERN.finditer(content))
+
+        # Добываем список меток
+        locs = self._parse_locations(content)
         
-        if not matches:
+        if not locs:
             self._add_warning(f"В файле {os.path.basename(file_path)} не найдено ни одной метки")
-            return [], {}
+        
+        return locs
 
-        return self._parse_locations(content, matches)
-
-    def _parse_locations(self, content, matches):
+    def _parse_locations(self, content):
         """Парсит все локации и связи"""
+
+        matches = list(LOC_PATTERN.finditer(content))
+
+        if not matches:
+            return []
+
         locs = []
-        name_to_id = {}
         name_counts = {}
         
         # Создаем локации
@@ -78,17 +82,19 @@ class UrqParser:
                 self._add_warning(f"Найден дубликат метки: '{name}' на строке {line_num}")
             else:
                 name_counts[name] = 0
-                name_to_id[name] = loc.id
             
             locs.append(loc)
         
-        # Извлекаем связи и флаги
+        # Извлекаем связи
         for i, loc in enumerate(locs):
             start_pos = matches[i].end()
             end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
             loc_content = content[start_pos:end_pos].lstrip()
             
-            self._extract_links_and_flags(loc, loc_content, locs, i, name_to_id)
+            self._extract_links_and_flags(loc, loc_content, locs, i)
+        
+        # Резолвим имена целей в ID
+        self._resolve_target_ids(locs)
         
         # Помечаем концевые локации
         source_ids = {loc.id for loc in locs if loc.links}
@@ -96,14 +102,55 @@ class UrqParser:
             if loc.id not in source_ids and not loc.dup:
                 loc.end = True
         
-        return locs, name_to_id
+        return locs
+
+    def _resolve_target_ids(self, locs):
+        """Резолвим имена целей в ID"""
+        # Создаем маппинг для быстрого поиска
+        name_to_id = {}
+        for loc in locs:
+            if not loc.dup:  # Только основные локации
+                name_to_id[loc.name] = loc.id
+        
+        # Резолвим все связи
+        for loc in locs:
+            resolved_links = []
+            for link in loc.links:
+                if isinstance(link[0], int):  # Автосвязь по индексу
+                    auto_idx, link_type, label = link
+                    if auto_idx < len(locs):
+                        target_loc = locs[auto_idx]
+                        resolved_links.append((target_loc.id, target_loc.name, link_type, label, False))
+                    continue
+                
+                target_name, link_type, label = link[:3]
+                
+                # Находим target_id
+                target_id = None
+                is_phantom = True
+                
+                if target_name == loc.name:  # Самоссылка
+                    target_id = loc.id
+                    is_phantom = False
+                elif target_name in name_to_id:  # Основная локация
+                    target_id = name_to_id[target_name]
+                    is_phantom = False
+                else:
+                    # Ищем среди дубликатов
+                    for dup_loc in locs:
+                        if dup_loc.name == target_name and dup_loc.dup:
+                            target_id = dup_loc.id
+                            is_phantom = False
+                            break
+                
+                resolved_links.append((target_id, target_name, link_type, label, is_phantom))
+            
+            loc.links = resolved_links
 
     def _prep_content(self, content):
         """Предобработка контента"""
         # Комменты и переносы
         content = COMMENTS_REMOVAL.sub('', content)        
-        # content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
-        # content = re.sub(r';[^\n]*', '', content)
         content = re.sub(r'\n\s*_', '', content)
         
         # Разбиваем if/then/else
@@ -147,8 +194,13 @@ class UrqParser:
             self._add_warning(f"Ошибка чтения файла {os.path.basename(file_path)}: {e}")
             return None
 
-    def _read_file_with_encoding(self, file_path, encoding):
-        """Читает файл с кодировкой"""
+    def _read_file(self, file_path):
+        """Читает файл"""
+        encoding = self._detect_encoding(file_path)
+
+        if not encoding:
+            return []
+
         try:
             with open(file_path, 'r', encoding=encoding) as f:
                 return f.read()
@@ -171,16 +223,17 @@ class UrqParser:
         """Финальная очистка текста"""
         return text.replace('"', "''") if text else "Нет описания"
 
-    def _extract_links_and_flags(self, loc, content, locs, loc_idx, name_to_id):
+    def _extract_links_and_flags(self, loc, content, locs, loc_idx):
         """Извлекает связи и устанавливает флаги"""
         has_end = END_PATTERN.search(content)
         has_goto = GOTO_PATTERN.search(content)
         
-        # Автосвязь - ищем следующую локацию в физическом порядке
+        # Автосвязь - сохраняем индекс следующей локации
         if not has_end and not has_goto:
             next_idx = loc_idx + 1
             if next_idx < len(locs):
-                loc.links.append((locs[next_idx].id, "auto", "", False))
+                # Сохраняем индекс для последующего резолва
+                loc.links.append((next_idx, "auto", ""))
 
         # Собираем уникальные тексты для инлайн кнопок
         processed_texts = set()
@@ -197,14 +250,14 @@ class UrqParser:
             # Обрабатываем pln всегда, p только если нет pln
             if (text_type == 'pln' or not pln_found) and text and text not in processed_texts:
                 processed_texts.add(text)
-                self._extract_inline_buttons(text, loc, name_to_id)
+                self._extract_inline_buttons(text, loc)
 
         # btn команды
         for match in BTN_PATTERN.finditer(content):
             target = match.group(1).strip()
             label = match.group(2)
             if target:
-                self._add_link_with_cycle_check(loc, target, "btn", label, name_to_id)
+                self._add_link_with_cycle_check(loc, target, "btn", label)
             else:
                 self._add_warning(f"Пустая цель btn из '{loc.name}', кнопка '{label}'")
 
@@ -212,7 +265,7 @@ class UrqParser:
         for match in GOTO_CMD_PATTERN.finditer(content):
             target = match.group(1).strip()
             if target:
-                self._add_link_with_cycle_check(loc, target, "goto", "", name_to_id)
+                self._add_link_with_cycle_check(loc, target, "goto", "")
             else:
                 self._add_warning(f"Пустая цель goto из '{loc.name}'")
 
@@ -220,11 +273,11 @@ class UrqParser:
         for match in PROC_CMD_PATTERN.finditer(content):
             target = match.group(1).strip()
             if target:
-                self._add_link_with_cycle_check(loc, target, "proc", "", name_to_id)
+                self._add_link_with_cycle_check(loc, target, "proc", "")
             else:
                 self._add_warning(f"Пустая цель proc из '{loc.name}'")
             
-    def _extract_inline_buttons(self, text, loc, name_to_id):
+    def _extract_inline_buttons(self, text, loc):
         """Извлекает инлайн кнопки из текста"""
         for match in INLINE_BTN_PATTERN.finditer(text):
             desc = match.group(1) if match.group(1) is not None else ""
@@ -237,9 +290,9 @@ class UrqParser:
             if match.group(2) is None:
                 target_stripped = desc_stripped
             
-            self._add_link_with_cycle_check(loc, target_stripped, "btn", desc_stripped, name_to_id)
+            self._add_link_with_cycle_check(loc, target_stripped, "btn", desc_stripped)
             
-    def _add_link_with_cycle_check(self, loc, target, link_type, label, name_to_id):
+    def _add_link_with_cycle_check(self, loc, target, link_type, label):
         """Добавляет связь с проверкой на цикл"""
         # Проверяем самоссылку
         if target == loc.name:
@@ -256,11 +309,8 @@ class UrqParser:
         else:
             clean_label = ""
         
-        # Проверяем существование цели и помечаем как phantom
-        target_exists = target in name_to_id or target == loc.name
-        is_phantom = not target_exists
-        
-        loc.links.append((target, link_type, clean_label, is_phantom))
+        # Временно сохраняем как 3-tuple, резолвим в _resolve_target_ids
+        loc.links.append((target, link_type, clean_label))
             
     def _clean_button_text(self, text):
         """Очищает текст кнопки"""

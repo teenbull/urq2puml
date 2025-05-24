@@ -94,9 +94,9 @@ class PlantumlGen:
         self.jar_path = jar_path
         self.warnings = []
 
-    def generate_puml(self, locs, name_to_id, output_file):
+    def generate_puml(self, locs, output_file):
         """Генерирует PUML файл"""
-        has_phantom = any(any(len(link) > 3 and link[3] for link in loc.links) for loc in locs)
+        has_phantom = any(any(len(link) > 4 and link[4] for link in loc.links) for loc in locs)
         content_parts = []
         
         # Основные локации
@@ -127,7 +127,7 @@ class PlantumlGen:
             content_parts.append(START_LOC)
 
         # Связи
-        content_parts.append(self._add_all_links(locs, name_to_id))
+        content_parts.append(self._add_all_links(locs))
         
         # Финальная сборка
         final_parts = ["@startuml\n"]
@@ -148,39 +148,21 @@ class PlantumlGen:
         
         return content
 
-    def _add_all_links(self, locs, name_to_id):
+    def _add_all_links(self, locs):
         """Добавляет все связи"""
         parts = []
         
         for loc in locs:
             for link in loc.links:
-                target, link_type, label = link[:3]
-                is_phantom = len(link) > 3 and link[3]
+                target_id, target_name, link_type, label, is_phantom = link
                 
                 if is_phantom:
-                    parts.append(self._format_phantom_link(loc.id, target, link_type, label))
-                    self._add_warning(f"Локация '{target}' для {link_type} из '{loc.name}' не найдена")
+                    parts.append(self._format_phantom_link(loc.id, target_name, link_type, label))
+                    self._add_warning(f"Локация '{target_name}' для {link_type} из '{loc.name}' не найдена")
                 else:
-                    if link_type == "auto":
-                        parts.append(self._format_link(loc.id, target, link_type, label))
-                    else:
-                        target_id = self._get_target_id(target, name_to_id, locs)
-                        parts.append(self._format_link(loc.id, target_id, link_type, label))
+                    parts.append(self._format_link(loc.id, target_id, link_type, label))
         
         return ''.join(parts)
-
-    def _get_target_id(self, target_name, name_to_id, locs):
-        """Находит ID цели"""
-        # Основные локации
-        if target_name in name_to_id:
-            return name_to_id[target_name]
-        
-        # Дубликаты
-        for loc in locs:
-            if loc.name == target_name and loc.dup:
-                return loc.id
-        
-        return None
 
     def _format_link(self, source_id, target_id, link_type, label):
         """Форматирует обычную связь"""
@@ -199,12 +181,12 @@ class PlantumlGen:
         
         return ""
 
-    def _format_phantom_link(self, source_id, target, link_type, label):
+    def _format_phantom_link(self, source_id, target_name, link_type, label):
         """Форматирует phantom связь"""
         if link_type == "btn" and label == "":
             return f"{source_id} -[{BLUE_COLOR},dotted]-> PHANTOM_NODE_URQ\n"
         
-        phantom_label = self._limit_text(label if link_type == "btn" and label else target, BTN_LIMIT)
+        phantom_label = self._limit_text(label if link_type == "btn" and label else target_name, BTN_LIMIT)
         return f"{source_id} -[{PHANTOM_ARROW_COLOR},dotted]-> PHANTOM_NODE_URQ : ({phantom_label})\n"
 
     def generate_local(self, puml_file, file_type):
