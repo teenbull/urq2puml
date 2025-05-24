@@ -16,6 +16,9 @@ PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
 PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
 
+TEXT_EXTRACTION = re.compile(r"^(pln|p)\s(.*)$", re.MULTILINE)
+COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.MULTILINE)
+
 class Loc:
     def __init__(self, id, name, desc, line):
         self.id = id
@@ -154,12 +157,11 @@ class UrqParser:
 
     def _extract_description(self, content):
         """Извлекает описание из контента"""
-        parts = [self._process_text_with_buttons(match.group(1).strip()).strip() 
-                for line in content.splitlines() 
-                if (match := PLN_TEXT_EXTRACTOR.match(line.strip()))]
+        parts = [self._process_text_with_buttons(match.group(2).strip()).strip() 
+                for match in TEXT_EXTRACTION.finditer(content)]
         
-        return self._clean_final_text(' '.join(parts)) if parts else "Нет описания"
-       
+        return self._clean_final_text(' '.join(parts)) if parts else "Нет описания"       
+    
     def _process_text_with_buttons(self, text):
         """Обрабатывает текст с инлайн кнопками"""
         return INLINE_BTN_PATTERN.sub(lambda m: m.group(1) if m.group(1) is not None else "", text)
@@ -182,20 +184,19 @@ class UrqParser:
         # Собираем уникальные тексты для инлайн кнопок
         processed_texts = set()
         
-        # pln тексты
-        for pln_match in PLN_PATTERN.finditer(content):
-            text = pln_match.group(1).strip()
-            if text and text not in processed_texts:
+        # Обрабатываем все pln/p тексты за один проход
+        pln_found = False
+        for match in TEXT_EXTRACTION.finditer(content):
+            text_type = match.group(1)  # 'pln' или 'p'
+            text = match.group(2).strip()
+            
+            if text_type == 'pln':
+                pln_found = True
+            
+            # Обрабатываем pln всегда, p только если нет pln
+            if (text_type == 'pln' or not pln_found) and text and text not in processed_texts:
                 processed_texts.add(text)
                 self._extract_inline_buttons(text, loc, name_to_id)
-
-        # p тексты если нет pln
-        if not any(PLN_PATTERN.finditer(content)):
-            for p_match in P_PATTERN.finditer(content):
-                text = p_match.group(1).strip()
-                if text and text not in processed_texts:
-                    processed_texts.add(text)
-                    self._extract_inline_buttons(text, loc, name_to_id)
 
         # btn команды
         for match in BTN_PATTERN.finditer(content):
@@ -221,7 +222,7 @@ class UrqParser:
                 self._add_link_with_cycle_check(loc, target, "proc", "", name_to_id)
             else:
                 self._add_warning(f"Пустая цель proc из '{loc.name}'")
-
+            
     def _extract_inline_buttons(self, text, loc, name_to_id):
         """Извлекает инлайн кнопки из текста"""
         for match in INLINE_BTN_PATTERN.finditer(text):
