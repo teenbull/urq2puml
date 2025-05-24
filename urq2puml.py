@@ -46,7 +46,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             return
 
         # Автопереключение на сетевой режим если jar потерялся
-        if not net and not os.path.exists(PUML_JAR_PATH):
+        if not net and not self.jar_exists(): #os.path.exists(PUML_JAR_PATH):
             net = True
             print("URQ to PlantUML: JAR не найден, переключение на сетевой режим")
 
@@ -123,6 +123,18 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             self._add_warning(f"Critical Error: Произошла ошибка при конвертации: {e}")
         finally:
             self._print_warnings()
+
+    def jar_exists(self):
+        global PUML_JAR_PATH
+        if os.path.exists(PUML_JAR_PATH):
+            return True
+        
+        script_dir = os.path.dirname(__file__)
+        for f in os.listdir(script_dir):
+            if f.lower().startswith('plantuml') and f.lower().endswith('.jar'):
+                PUML_JAR_PATH = os.path.join(script_dir, f)
+                return True
+        return False
 
     def _open_file_in_default_program(self, file_path):
         """Открывает файл в программе по умолчанию"""
