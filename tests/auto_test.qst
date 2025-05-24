@@ -1,0 +1,16 @@
+:Локация с автопереходом
+pln Локация без end. Aвтоматически идем дальше.
+
+:Локация
+pln Тоже без end.
+:Локация
+pln Это локация-дубль без end.
+:Локация
+pln Это локация c goto на start
+goto start
+end
+
+:start
+
+
+;Локация с автопереходом should be autolinked with Локация (line 4) which should be autolinked with Локация (line 6) which should be autolinked with Локация (line 8)
