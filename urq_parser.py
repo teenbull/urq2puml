@@ -16,6 +16,17 @@ PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
 PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
 
+class Loc:
+    def __init__(self, id, name, desc, line):
+        self.id = id
+        self.name = name
+        self.desc = desc
+        self.line = line
+        self.dup = False
+        self.cycle = False
+        self.end = False
+        self.links = []  # [(target, type, label, is_phantom)]
+
 class UrqParser:
     def __init__(self):
         self.warnings = []
@@ -24,59 +35,65 @@ class UrqParser:
         """Парсит URQ файл и возвращает структуру"""
         encoding = self._detect_encoding(file_path)
         if not encoding:
-            return None
+            return [], {}
             
         content = self._read_file_with_encoding(file_path, encoding)
         if not content:
-            return None
+            return [], {}
 
         content = self._prep_content(content)
         matches = list(LOC_PATTERN.finditer(content))
         
         if not matches:
             self._add_warning(f"В файле {os.path.basename(file_path)} не найдено ни одной метки")
-            return None
+            return [], {}
 
         return self._parse_locations(content, matches)
 
     def _parse_locations(self, content, matches):
         """Парсит все локации и связи"""
-        locs = {}  # {name: [desc, id]}
-        all_locs = {}  # {id: [name, desc, line_num, is_duplicate]}
-        btn_links = []
-        auto_links = []
-        goto_links = []
-        proc_links = []
-        cycle_ids = set()
-        loc_counter = 0
+        locs = []
+        name_to_id = {}
         name_counts = {}
         
+        # Создаем локации
         for i, match in enumerate(matches):
             name = match.group(1).strip()
             start_pos = match.end()
-            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)  
+            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
             
             line_num = content[:match.start()].count('\n') + 1
             loc_content = content[start_pos:end_pos].lstrip()
             desc = self._extract_description(loc_content)
             
-            loc_id = str(loc_counter)
-            is_dup = name in name_counts
+            loc = Loc(str(i), name, desc, line_num)
             
-            if not is_dup:
-                locs[name] = [desc, loc_id]
-                name_counts[name] = 0
-            else:
+            # Проверяем дубликаты
+            if name in name_counts:
+                loc.dup = True
                 name_counts[name] += 1
                 self._add_warning(f"Найден дубликат метки: '{name}' на строке {line_num}")
+            else:
+                name_counts[name] = 0
+                name_to_id[name] = loc.id
             
-            all_locs[loc_id] = [name, desc, line_num, is_dup]
+            locs.append(loc)
+        
+        # Извлекаем связи и флаги
+        for i, loc in enumerate(locs):
+            start_pos = matches[i].end()
+            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+            loc_content = content[start_pos:end_pos].lstrip()
             
-            next_loc_id = str(loc_counter + 1) if i + 1 < len(matches) else None
-            self._extract_links(name, loc_content, btn_links, auto_links, goto_links, proc_links, loc_id, next_loc_id, cycle_ids)
-            loc_counter += 1
-
-        return locs, all_locs, btn_links, auto_links, goto_links, proc_links, cycle_ids
+            self._extract_links_and_flags(loc, loc_content, locs, i, name_to_id)
+        
+        # Помечаем концевые локации
+        source_ids = {loc.id for loc in locs if loc.links}
+        for loc in locs:
+            if loc.id not in source_ids and not loc.dup:
+                loc.end = True
+        
+        return locs, name_to_id
 
     def _prep_content(self, content):
         """Предобработка контента"""
@@ -151,76 +168,97 @@ class UrqParser:
         """Финальная очистка текста"""
         return text.replace('"', "''") if text else "Нет описания"
 
-    def _extract_links(self, loc_name, content, btn_links, auto_links, goto_links, proc_links, loc_id, next_loc_id, cycle_ids):
-        """Извлекает связи из локации"""
+    def _extract_links_and_flags(self, loc, content, locs, loc_idx, name_to_id):
+        """Извлекает связи и устанавливает флаги"""
         has_end = END_PATTERN.search(content)
         has_goto = GOTO_PATTERN.search(content)
         
-        # Автосвязь
-        if not has_end and not has_goto and next_loc_id is not None:
-            auto_links.append((loc_id, next_loc_id, "auto"))
+        # Автосвязь - ищем следующую локацию в физическом порядке
+        if not has_end and not has_goto:
+            next_idx = loc_idx + 1
+            if next_idx < len(locs):
+                loc.links.append((locs[next_idx].id, "auto", "", False))
 
-        # Собираем уникальные тексты
+        # Собираем уникальные тексты для инлайн кнопок
         processed_texts = set()
         
-        # Сначала pln
+        # pln тексты
         for pln_match in PLN_PATTERN.finditer(content):
             text = pln_match.group(1).strip()
             if text and text not in processed_texts:
                 processed_texts.add(text)
-                self._extract_inline_buttons(text, loc_name, loc_id, btn_links, cycle_ids)
+                self._extract_inline_buttons(text, loc, name_to_id)
 
-        # Если нет pln, тогда p
+        # p тексты если нет pln
         if not any(PLN_PATTERN.finditer(content)):
             for p_match in P_PATTERN.finditer(content):
                 text = p_match.group(1).strip()
                 if text and text not in processed_texts:
                     processed_texts.add(text)
-                    self._extract_inline_buttons(text, loc_name, loc_id, btn_links, cycle_ids)
+                    self._extract_inline_buttons(text, loc, name_to_id)
 
         # btn команды
         for match in BTN_PATTERN.finditer(content):
             target = match.group(1).strip()
             label = match.group(2)
             if target:
-                if target == loc_name:
-                    cycle_ids.add(loc_id)
-                # Пустые пустыми и остаются
-                clean_label = "" if label == "" else (" " if label.strip() == "" else self._clean_button_text(label.strip()))
-                btn_links.append((loc_id, target, clean_label))
+                self._add_link_with_cycle_check(loc, target, "btn", label, name_to_id)
             else:
-                self._add_warning(f"Пустая цель btn из '{loc_name}', кнопка '{label}'")
+                self._add_warning(f"Пустая цель btn из '{loc.name}', кнопка '{label}'")
 
-        # goto/proc команды
-        for pattern, links, cmd_type in [(GOTO_CMD_PATTERN, goto_links, "goto"), (PROC_CMD_PATTERN, proc_links, "proc")]:
-            for match in pattern.finditer(content):
-                target = match.group(1).strip()
-                if target:
-                    if target == loc_name:
-                        cycle_ids.add(loc_id)
-                    links.append((loc_id, target, cmd_type))
-                else:
-                    self._add_warning(f"Пустая цель {cmd_type} из '{loc_name}'")
+        # goto команды
+        for match in GOTO_CMD_PATTERN.finditer(content):
+            target = match.group(1).strip()
+            if target:
+                self._add_link_with_cycle_check(loc, target, "goto", "", name_to_id)
+            else:
+                self._add_warning(f"Пустая цель goto из '{loc.name}'")
 
-    def _extract_inline_buttons(self, text, loc_name, loc_id, btn_links, cycle_ids):
+        # proc команды
+        for match in PROC_CMD_PATTERN.finditer(content):
+            target = match.group(1).strip()
+            if target:
+                self._add_link_with_cycle_check(loc, target, "proc", "", name_to_id)
+            else:
+                self._add_warning(f"Пустая цель proc из '{loc.name}'")
+
+    def _extract_inline_buttons(self, text, loc, name_to_id):
         """Извлекает инлайн кнопки из текста"""
         for match in INLINE_BTN_PATTERN.finditer(text):
             desc = match.group(1) if match.group(1) is not None else ""
             target = match.group(2) if match.group(2) is not None else desc
                 
             desc_stripped = desc.strip() if desc else ""
-            safe_desc = "" if desc_stripped == "" else self._clean_button_text(desc_stripped)
             target_stripped = target.strip() if target else ""
             
             # Если цель не указана явно, используем описание
             if match.group(2) is None:
                 target_stripped = desc_stripped
-                
-            # Проверяем самоссылку
-            if target_stripped and target_stripped == loc_name:
-                cycle_ids.add(loc_id)
             
-            btn_links.append((loc_id, target_stripped, safe_desc))
+            self._add_link_with_cycle_check(loc, target_stripped, "btn", desc_stripped, name_to_id)
+            
+    def _add_link_with_cycle_check(self, loc, target, link_type, label, name_to_id):
+        """Добавляет связь с проверкой на цикл"""
+        # Проверяем самоссылку
+        if target == loc.name:
+            loc.cycle = True
+        
+        # Очищаем лейбл для btn
+        if link_type == "btn":
+            if label == "":
+                clean_label = ""
+            elif label.strip() == "":
+                clean_label = " "
+            else:
+                clean_label = self._clean_button_text(label.strip())
+        else:
+            clean_label = ""
+        
+        # Проверяем существование цели и помечаем как phantom
+        target_exists = target in name_to_id or target == loc.name
+        is_phantom = not target_exists
+        
+        loc.links.append((target, link_type, clean_label, is_phantom))
             
     def _clean_button_text(self, text):
         """Очищает текст кнопки"""

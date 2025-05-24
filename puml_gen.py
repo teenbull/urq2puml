@@ -47,11 +47,10 @@ START_LOC = "[*] --> 0\n"
 AUTO_FORMAT = "{} -[dotted]-> {}\n"
 BTN_FORMAT = "{} --> {} : ({})\n" 
 GOTO_FORMAT = "{} --> {} : [{}]\n"
+PROC_FORMAT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
 STATE_FORMAT = 'state "{}" as {}'
-DOUBLE_STATE_FORMAT = 'state "{}" as {} {}'
 STATE_DESC_FORMAT = '{}: {}\n'
 LOST_DESC_FORMAT = '{}: [Дубликат метки, строка {}]\\n\\n{}\n'
-PROC_FORMAT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
 # ----------------------------------------------------------------------
 
 class PlantumlOnlineGen:
@@ -95,55 +94,44 @@ class PlantumlGen:
         self.jar_path = jar_path
         self.warnings = []
 
-    def generate_puml(self, locs, all_locs, btn_links, auto_links, goto_links, proc_links, cycle_ids, output_file):
+    def generate_puml(self, locs, name_to_id, output_file):
         """Генерирует PUML файл"""
-        # Lookup таблицы
-        id_to_name = {loc_id: name for name, (_, loc_id) in locs.items()}
-        name_to_id = {name: loc_id for name, (_, loc_id) in locs.items()}
-        
-        # Исходящие локации
-        source_ids = {s for s, _, _ in btn_links + auto_links + goto_links + proc_links}
-        
-        self.has_phantom_links = False
+        has_phantom = any(any(len(link) > 3 and link[3] for link in loc.links) for loc in locs)
         content_parts = []
         
         # Основные локации
-        for name, (desc, loc_id) in sorted(locs.items(), key=lambda x: int(x[1][1])):
-            clean_name = self._limit_text(name, LOC_LIMIT)
-            clean_desc = self._limit_text(desc, DESC_LIMIT)
-            
-            state_line = STATE_FORMAT.format(clean_name, loc_id)
-            if loc_id in cycle_ids:
-                state_line += f" {CYCLE_COLOR}"
-            elif loc_id not in source_ids:
-                state_line += f" {END_COLOR}"
-            
-            content_parts.extend([state_line + "\n", STATE_DESC_FORMAT.format(loc_id, clean_desc)])
+        for loc in sorted(locs, key=lambda x: int(x.id)):
+            if not loc.dup:
+                clean_name = self._limit_text(loc.name, LOC_LIMIT)
+                clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
+                
+                state_line = STATE_FORMAT.format(clean_name, loc.id)
+                if loc.cycle:
+                    state_line += f" {CYCLE_COLOR}"
+                elif loc.end:
+                    state_line += f" {END_COLOR}"
+                
+                content_parts.extend([state_line + "\n", STATE_DESC_FORMAT.format(loc.id, clean_desc)])
 
         # Дубликаты
-        for loc_id, (name, desc, line_num, is_duplicate) in all_locs.items():
-            if is_duplicate:
-                clean_name = self._limit_text(name, LOC_LIMIT)
-                clean_desc = self._limit_text(desc, DESC_LIMIT)
+        for loc in locs:
+            if loc.dup:
+                clean_name = self._limit_text(loc.name, LOC_LIMIT)
+                clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
                 
-                state_line = DOUBLE_STATE_FORMAT.format(clean_name, loc_id, DOUBLE_COLOR)
-                content_parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc)])
+                state_line = f'state "{clean_name}" as {loc.id} {DOUBLE_COLOR}'
+                content_parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc.id, loc.line, clean_desc)])
 
         # Старт
-        if any(loc_id == '0' for _, (_, loc_id) in locs.items()) or '0' in all_locs:
+        if any(loc.id == '0' for loc in locs):
             content_parts.append(START_LOC)
 
         # Связи
-        content_parts.extend([
-            self._add_links(btn_links, name_to_id, all_locs, id_to_name, BTN_FORMAT, "btn"),
-            self._add_auto_links(auto_links),
-            self._add_links(goto_links, name_to_id, all_locs, id_to_name, GOTO_FORMAT, "goto"),
-            self._add_proc_links(proc_links, name_to_id, all_locs, id_to_name)
-        ])
+        content_parts.append(self._add_all_links(locs, name_to_id))
         
         # Финальная сборка
         final_parts = ["@startuml\n"]
-        if self.has_phantom_links:
+        if has_phantom:
             final_parts.append(PHANTOM_NODE)
         final_parts.append(SKIN_PARAMS)
         final_parts.extend(content_parts)
@@ -159,6 +147,65 @@ class PlantumlGen:
             raise Exception(f"Ошибка записи файла {output_file}: {e}")
         
         return content
+
+    def _add_all_links(self, locs, name_to_id):
+        """Добавляет все связи"""
+        parts = []
+        
+        for loc in locs:
+            for link in loc.links:
+                target, link_type, label = link[:3]
+                is_phantom = len(link) > 3 and link[3]
+                
+                if is_phantom:
+                    parts.append(self._format_phantom_link(loc.id, target, link_type, label))
+                    self._add_warning(f"Локация '{target}' для {link_type} из '{loc.name}' не найдена")
+                else:
+                    if link_type == "auto":
+                        parts.append(self._format_link(loc.id, target, link_type, label))
+                    else:
+                        target_id = self._get_target_id(target, name_to_id, locs)
+                        parts.append(self._format_link(loc.id, target_id, link_type, label))
+        
+        return ''.join(parts)
+
+    def _get_target_id(self, target_name, name_to_id, locs):
+        """Находит ID цели"""
+        # Основные локации
+        if target_name in name_to_id:
+            return name_to_id[target_name]
+        
+        # Дубликаты
+        for loc in locs:
+            if loc.name == target_name and loc.dup:
+                return loc.id
+        
+        return None
+
+    def _format_link(self, source_id, target_id, link_type, label):
+        """Форматирует обычную связь"""
+        if link_type == "auto":            
+            return AUTO_FORMAT.format(source_id, target_id)
+        elif link_type == "btn":
+            if label == "":  # Пустая - синяя стрелка
+                return f"{source_id} -[{BLUE_COLOR}]-> {target_id}\n"
+            else:  # С текстом - обычная
+                clean_label = self._limit_text(label, BTN_LIMIT)
+                return BTN_FORMAT.format(source_id, target_id, clean_label)
+        elif link_type == "goto":
+            return GOTO_FORMAT.format(source_id, target_id, "goto")
+        elif link_type == "proc":
+            return PROC_FORMAT.format(source_id, target_id, target_id, source_id)
+        
+        return ""
+
+    def _format_phantom_link(self, source_id, target, link_type, label):
+        """Форматирует phantom связь"""
+        if link_type == "btn" and label == "":
+            return f"{source_id} -[{BLUE_COLOR},dotted]-> PHANTOM_NODE_URQ\n"
+        
+        phantom_label = self._limit_text(label if link_type == "btn" and label else target, BTN_LIMIT)
+        return f"{source_id} -[{PHANTOM_ARROW_COLOR},dotted]-> PHANTOM_NODE_URQ : ({phantom_label})\n"
 
     def generate_local(self, puml_file, file_type):
         """Генерирует файл через локальный PlantUML"""
@@ -234,77 +281,13 @@ class PlantumlGen:
             output_file = os.path.splitext(puml_file)[0] + '.' + file_type
             with open(output_file, 'wb') as f:
                 f.write(data)
-            
+           
             print(f"PlantUML Gen: {file_type.upper()} создан онлайн: {output_file}")
             return True
             
         except Exception as e:
             self._add_warning(f"Онлайн ошибка {file_type.upper()}: {e}")
             return False
-            
-    def _add_links(self, links, name_to_id, all_locs, id_to_name, fmt, link_type):
-        """Универсальный метод добавления связей"""
-        parts = []
-        for link_data in links:
-            # Защита от неполных данных
-            if len(link_data) < 3:
-                continue
-            source_id, target, label = link_data
-            target_id = self._resolve_target(target, name_to_id, all_locs)
-            
-            if target_id is not None:
-                if link_type == "btn":
-                    if label == "":  # Пустая - синяя стрелка
-                        parts.append(f"{source_id} -[{BLUE_COLOR}]-> {target_id}\n")
-                    else:  # С текстом - обычная
-                        clean_label = self._limit_text(label, BTN_LIMIT)
-                        parts.append(fmt.format(source_id, target_id, clean_label))
-                else:  # goto
-                    parts.append(fmt.format(source_id, target_id, "goto"))
-            else:
-                self.has_phantom_links = True
-                phantom_label = self._limit_text(label if link_type == "btn" and label else target, BTN_LIMIT)
-                if phantom_label == "":
-                    parts.append(f"{source_id} -[{BLUE_COLOR},dotted]-> PHANTOM_NODE_URQ\n")
-                else:
-                    parts.append(f"{source_id} -[{PHANTOM_ARROW_COLOR},dotted]-> PHANTOM_NODE_URQ : ({phantom_label})\n")
-                loc_name = id_to_name.get(source_id, "неизвестная")
-                self._add_warning(f"Локация '{target}' для {link_type} из '{loc_name}' не найдена")
-        return ''.join(parts)
-
-    def _add_auto_links(self, auto_links):
-        """Добавляет автосвязи"""
-        return ''.join(AUTO_FORMAT.format(source_id, target_id) for source_id, target_id, _ in auto_links)
-
-    def _add_proc_links(self, proc_links, name_to_id, all_locs, id_to_name):
-        """Добавляет proc связи"""
-        parts = []
-        for source_id, target, _ in proc_links:
-            target_id = self._resolve_target(target, name_to_id, all_locs)
-            
-            if target_id is not None:
-                # Fixed: Now providing 4 arguments to match PROC_FORMAT (source->target, target->source dotted)
-                parts.append(PROC_FORMAT.format(source_id, target_id, target_id, source_id))
-            else:
-                self.has_phantom_links = True
-                phantom_label = self._limit_text(target, BTN_LIMIT)
-                parts.append(f"{source_id} -[{PHANTOM_ARROW_COLOR},dotted]-> PHANTOM_NODE_URQ : ({phantom_label})\n")
-                loc_name = id_to_name.get(source_id, "неизвестная")
-                self._add_warning(f"Локация '{target}' для proc из '{loc_name}' не найдена")
-        return ''.join(parts)
-
-    def _resolve_target(self, target_name, name_to_id, all_locs):
-        """Находит ID цели"""
-        # Основные локации сначала
-        if target_name in name_to_id:
-            return name_to_id[target_name]
-        
-        # Дубликаты
-        for loc_id, (name, _, _, is_duplicate) in all_locs.items():
-            if name == target_name and is_duplicate:
-                return loc_id
-        
-        return None
 
     def _limit_text(self, text, max_len):
         """Ограничивает длину текста для диаграммы"""
