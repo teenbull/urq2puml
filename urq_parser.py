@@ -101,8 +101,9 @@ class UrqParser:
     def _prep_content(self, content):
         """Предобработка контента"""
         # Комменты и переносы
-        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
-        content = re.sub(r';[^\n]*', '', content)
+        content = COMMENTS_REMOVAL.sub('', content)        
+        # content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        # content = re.sub(r';[^\n]*', '', content)
         content = re.sub(r'\n\s*_', '', content)
         
         # Разбиваем if/then/else
