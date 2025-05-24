@@ -1,0 +1,31 @@
+/* comment */:new;comment
+p/* comment*/l/* _ sdfsd */n hello, world ; and thanks for all the fish!
+/*
+
+
+
+
+
+
+
+*/
+
+;pln new line
+pln hi!
+end/*
+
+*/
+
+:ne
+_w_loc/*sdfsf */
+proc 
+_old_loc
+end
+
+:000
+gotoloc1
+goto loc2
+
+if a = 10 then b = 40 & if z = 5 and b = 10 then goto z else goto hell
+
+end
