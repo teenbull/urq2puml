@@ -5,7 +5,7 @@
 # Если файл не найдет - будет попытка генерить граф онлайн             #
 PUML_JAR_PATH = "C:\\java\\plantuml-1.2025.2.jar"                      #
 # ----------------------------------------------------------------------
-
+ 
 import sublime
 import sublime_plugin
 import os, sys
@@ -50,7 +50,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             net = True
             print("URQ to PlantUML: JAR не найден, переключение на сетевой режим")
 
-        self.view.window().status_message("Обработка {}...".format("PUML" if is_puml else "URQ"))
+        self.view.window().status_message(f"Обработка {'PUML' if is_puml else 'URQ'}...")
         self.warnings = []
 
         try:
@@ -61,7 +61,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                     with open(puml_file, 'r', encoding='utf-8') as f:
                         puml_content = f.read()
                 except Exception as e:
-                    self._add_warning("Ошибка чтения PUML файла: {}".format(e))
+                    self._add_warning(f"Ошибка чтения PUML файла: {e}")
                     return
                 gen = PlantumlGen(PUML_JAR_PATH if not net else None)
                 self.warnings.extend(gen.get_warnings())
@@ -83,24 +83,18 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 self.warnings.extend(gen.get_warnings())
             
             if os.path.exists(puml_file):
-                # !!! не открывать лишний раз puml файл
+                # Не открывать лишний раз puml файл
                 if not png and not svg and not is_puml:
                     self.view.window().open_file(puml_file)
                 
-                status_parts = ["{}: {}".format(
-                    "PUML обработка" if is_puml else "Конвертация URQ в PlantUML",
-                    "готов" if is_puml else ".puml файл сгенерирован"
-                )]
+                status_parts = [f"{'PUML обработка' if is_puml else 'Конвертация URQ в PlantUML'}: {'готов' if is_puml else '.puml файл сгенерирован'}"]
                 
                 # Генерируем PNG если нужно
                 if png:
-                    if net:
-                        png_success = gen.generate_online(puml_content, puml_file, 'png')
-                    else:
-                        png_success = gen.generate_local(puml_file, 'png')
+                    png_success = gen.generate_online(puml_content, puml_file, 'png') if net else gen.generate_local(puml_file, 'png')
                     
                     if png_success:
-                        status_parts.append(".png файл создан" + (" онлайн" if net else "") + " и открыт")
+                        status_parts.append(f".png файл создан{' онлайн' if net else ''} и открыт")
                         png_file = os.path.splitext(puml_file)[0] + '.png'
                         if not self._open_file_in_default_program(png_file):
                             sublime.error_message("Не удалось открыть PNG файл в программе по умолчанию")
@@ -109,13 +103,10 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 
                 # Генерируем SVG если нужно
                 if svg:
-                    if net:
-                        svg_success = gen.generate_online(puml_content, puml_file, 'svg')
-                    else:
-                        svg_success = gen.generate_local(puml_file, 'svg')
+                    svg_success = gen.generate_online(puml_content, puml_file, 'svg') if net else gen.generate_local(puml_file, 'svg')
                     
                     if svg_success:
-                        status_parts.append(".svg файл создан" + (" онлайн" if net else ""))
+                        status_parts.append(f".svg файл создан{' онлайн' if net else ''}")
                         
                         svg_file_path = os.path.splitext(puml_file)[0] + '.svg'
                         if not self._open_file_in_default_program(svg_file_path):
@@ -126,12 +117,10 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 self.view.window().status_message(". ".join(status_parts) + ".")
                 self.warnings.extend(gen.get_warnings())
             else:
-                msg = "URQ to PlantUML Error: Файл .puml не был создан."
-                self.warnings.append(msg)
-                print(msg)
+                self._add_warning("Critical Error: Файл .puml не был создан.")
 
         except Exception as e:
-            self._add_warning("Critical Error: Произошла ошибка при конвертации: {}".format(e))
+            self._add_warning(f"Critical Error: Произошла ошибка при конвертации: {e}")
         finally:
             self._print_warnings()
 
@@ -139,22 +128,19 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         """Открывает файл в программе по умолчанию"""
         try:
             if sys.platform.startswith('win'):
-                # Windows
                 os.startfile(file_path)
             elif sys.platform.startswith('darwin'):
-                # macOS
                 subprocess.call(['open', file_path])
             else:
-                # Linux
                 subprocess.call(['xdg-open', file_path])
             return True
         except Exception as e:
-            self._add_warning("Не удалось открыть файл {}: {}".format(file_path, e))
+            self._add_warning(f"Не удалось открыть файл {file_path}: {e}")
             return False
 
     def _add_warning(self, message):
         """Добавляет предупреждение в список"""
-        full_msg = "URQ to PlantUML Warning: {}".format(message)
+        full_msg = f"URQ to PlantUML Warning: {message}"
         self.warnings.append(full_msg)
         print(full_msg)
 

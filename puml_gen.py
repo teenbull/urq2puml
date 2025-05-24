@@ -6,48 +6,52 @@ import base64
 import zlib
 import urllib.request
 import urllib.error
-# print("Package name:", os.path.basename(os.path.dirname(__file__)))
 
 # ----------------------------------------------------------------------
-# Лимиты и константы
+# Лимиты
 LOC_LIMIT = 40
 DESC_LIMIT = 50
 BTN_LIMIT = 30
 
-# PlantUML стили
-PHANTOM_NODE = """state "//phantom" as PHANTOM_NODE_URQ #ffcccb {
-  PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
-}
-"""
-
-SKIN_PARAMS = """skinparam stateArrowColor #606060
-skinparam state {
-    BackgroundColor #F0F8FF
-    BorderColor #A9A9A9
-    FontColor #303030
-    ArrowFontColor #404040
-}
-"""
-
-# Цвета состояний
+# Цвета
+PHANTOM_COLOR = "#ffcccb"
+STATE_BG_COLOR = "#F0F8FF"
+BORDER_COLOR = "#A9A9A9"
+FONT_COLOR = "#303030"
+ARROW_COLOR = "#606060"
+ARROW_FONT_COLOR = "#404040"
 CYCLE_COLOR = "#ffffcc"
 DOUBLE_COLOR = "#ffcccb"
 END_COLOR = "#d0f0d0"
+BLUE_COLOR = "#6fb4d4"
+PHANTOM_ARROW_COLOR = "#CD5C5C"
+
+# PlantUML элементы
+PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
+  PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
+}}
+"""
+
+SKIN_PARAMS = f"""skinparam stateArrowColor {ARROW_COLOR}
+skinparam state {{
+    BackgroundColor {STATE_BG_COLOR}
+    BorderColor {BORDER_COLOR}
+    FontColor {FONT_COLOR}
+    ArrowFontColor {ARROW_FONT_COLOR}
+}}
+"""
+
 START_LOC = "[*] --> 0\n"
 
-# Форматы
-AUTO_FORMAT = "{0} -[dotted]-> {1}\n"
-BTN_FORMAT = "{0} --> {1} : ({2})\n" 
-GOTO_FORMAT = "{0} --> {1} : [{2}]\n"
-STATE_FORMAT = 'state "{0}" as {1}'
-DOUBLE_STATE_FORMAT = 'state "{0}" as {1} {2}'
-STATE_DESC_FORMAT = '{0}: {1}\n'
-LOST_DESC_FORMAT = '{0}: [Дубликат метки, строка {1}]\\n\\n{2}\n'
-PROC_FORMAT = "{0} --> {1} : [proc]\n{1} -[dotted]-> {0}\n"
-
-EMPTY_BTN_FORMAT = "{0} -[#6fb4d4]-> {1}\n"
-PHANTOM_FORMAT = "{0} -[#CD5C5C,dotted]-> PHANTOM_NODE_URQ : ({1})\n"
-PHANTOM_EMPTY_FORMAT = "{0} -[#6fb4d4,dotted]-> PHANTOM_NODE_URQ\n"
+# Форматы связей
+AUTO_FORMAT = "{} -[dotted]-> {}\n"
+BTN_FORMAT = "{} --> {} : ({})\n" 
+GOTO_FORMAT = "{} --> {} : [{}]\n"
+STATE_FORMAT = 'state "{}" as {}'
+DOUBLE_STATE_FORMAT = 'state "{}" as {} {}'
+STATE_DESC_FORMAT = '{}: {}\n'
+LOST_DESC_FORMAT = '{}: [Дубликат метки, строка {}]\\n\\n{}\n'
+PROC_FORMAT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
 # ----------------------------------------------------------------------
 
 class PlantumlOnlineGen:
@@ -62,29 +66,28 @@ class PlantumlOnlineGen:
         """Запрос к серверу PlantUML"""
         enc = zlib.compress(text.encode('utf-8'))[2:-4]
         enc_b64 = base64.b64encode(enc).decode().translate(self.b64_to_p)
-        url = "{}{}/{}".format(self.server_url, type, enc_b64)
+        url = f"{self.server_url}{type}/{enc_b64}"
         h = {'User-Agent': 'Sublime URQ2PUML'}
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=30) as resp:
                 if resp.getcode() == 200:
                     return resp.read()
                 err_body = resp.read().decode(errors='replace') or "(empty)"
-                err_msg = "HTTP Error {}: {}. Body: {}".format(resp.getcode(), resp.reason, err_body)
-                print("Online Gen Error Details: " + err_msg)
+                err_msg = f"HTTP Error {resp.getcode()}: {resp.reason}. Body: {err_body}"
+                print(f"Online Gen Error Details: {err_msg}")
                 raise urllib.error.HTTPError(url, resp.getcode(), err_msg, resp.headers, None)
-        except urllib.error.HTTPError as e_http:
-            print("Online Gen HTTPError: {} {}".format(e_http.code, e_http.reason))
+        except urllib.error.HTTPError:
             raise
-        except Exception as e_gen:
-            raise RuntimeError("Сервер PlantUML ({}) ошибка: {}".format(type(e_gen).__name__, e_gen))
+        except Exception as e:
+            raise RuntimeError(f"Сервер PlantUML ({type(e).__name__}) ошибка: {e}")
 
-    def generate_png(self, plantuml_text):
+    def generate_png(self, puml_text):
         """Генерирует PNG"""
-        return self._req("img", plantuml_text)
+        return self._req("img", puml_text)
 
-    def generate_svg(self, plantuml_text):
+    def generate_svg(self, puml_text):
         """Генерирует SVG"""
-        return self._req("svg", plantuml_text)
+        return self._req("svg", puml_text)
 
 class PlantumlGen:
     """Генератор PlantUML диаграмм"""
@@ -94,19 +97,14 @@ class PlantumlGen:
 
     def generate_puml(self, locs, all_locs, btn_links, auto_links, goto_links, proc_links, cycle_ids, output_file):
         """Генерирует PUML файл"""
-        # Создаем lookup таблицы
+        # Lookup таблицы
         id_to_name = {loc_id: name for name, (_, loc_id) in locs.items()}
         name_to_id = {name: loc_id for name, (_, loc_id) in locs.items()}
         
-        # Находим исходящие локации
-        source_ids = set()
-        for s, _, _ in btn_links + auto_links + goto_links + proc_links:
-            source_ids.add(s)
+        # Исходящие локации
+        source_ids = {s for s, _, _ in btn_links + auto_links + goto_links + proc_links}
         
-        # Флаг для phantom связей
         self.has_phantom_links = False
-        
-        # Генерируем основное содержимое диаграммы
         content_parts = []
         
         # Основные локации
@@ -116,9 +114,9 @@ class PlantumlGen:
             
             state_line = STATE_FORMAT.format(clean_name, loc_id)
             if loc_id in cycle_ids:
-                state_line += " {}".format(CYCLE_COLOR)
+                state_line += f" {CYCLE_COLOR}"
             elif loc_id not in source_ids:
-                state_line += " {}".format(END_COLOR)
+                state_line += f" {END_COLOR}"
             
             content_parts.extend([state_line + "\n", STATE_DESC_FORMAT.format(loc_id, clean_desc)])
 
@@ -131,11 +129,11 @@ class PlantumlGen:
                 state_line = DOUBLE_STATE_FORMAT.format(clean_name, loc_id, DOUBLE_COLOR)
                 content_parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc_id, line_num, clean_desc)])
 
-        # Стартовая локация
+        # Старт
         if any(loc_id == '0' for _, (_, loc_id) in locs.items()) or '0' in all_locs:
             content_parts.append(START_LOC)
 
-        # Связи (здесь устанавливается флаг has_phantom_links)
+        # Связи
         content_parts.extend([
             self._add_links(btn_links, name_to_id, all_locs, id_to_name, BTN_FORMAT, "btn"),
             self._add_auto_links(auto_links),
@@ -143,45 +141,41 @@ class PlantumlGen:
             self._add_proc_links(proc_links, name_to_id, all_locs, id_to_name)
         ])
         
-        # Строим финальную структуру PlantUML
+        # Финальная сборка
         final_parts = ["@startuml\n"]
-        
-        # Добавляем phantom node только если есть phantom связи
         if self.has_phantom_links:
             final_parts.append(PHANTOM_NODE)
-        
         final_parts.append(SKIN_PARAMS)
         final_parts.extend(content_parts)
         final_parts.append("@enduml\n")
         
         content = ''.join(final_parts)
         
-        # Записываем файл
         try:
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(content)
-            print("PlantUML Gen: Файл создан: {}".format(output_file))
+            print(f"PlantUML Gen: Файл создан: {output_file}")
         except Exception as e:
-            raise Exception("Ошибка записи файла {}: {}".format(output_file, e))
+            raise Exception(f"Ошибка записи файла {output_file}: {e}")
         
         return content
 
     def generate_local(self, puml_file, file_type):
         """Генерирует файл через локальный PlantUML"""
         if not self.jar_path or not os.path.exists(self.jar_path):
-            self._add_warning("PlantUML JAR не найден: {}".format(self.jar_path))
+            self._add_warning(f"PlantUML JAR не найден: {self.jar_path}")
             return False
         
         if not os.path.exists(puml_file):
-            self._add_warning("PUML файл не найден: {}".format(puml_file))
+            self._add_warning(f"PUML файл не найден: {puml_file}")
             return False
         
         type_flags = {'png': '-tpng', 'svg': '-tsvg'}
         if file_type not in type_flags:
-            self._add_warning("Неподдерживаемый тип файла: {}".format(file_type))
+            self._add_warning(f"Неподдерживаемый тип файла: {file_type}")
             return False
         
-        print("PlantUML Gen: {} файл генерируется...".format(file_type.upper()))
+        print(f"PlantUML Gen: {file_type.upper()} файл генерируется...")
         
         cmd = [
             'java', 
@@ -213,80 +207,74 @@ class PlantumlGen:
             self._add_warning("Java не найдена в PATH")
             return False
         except Exception as e:
-            self._add_warning("Ошибка PlantUML для {}: {}".format(file_type.upper(), e))
+            self._add_warning(f"Ошибка PlantUML для {file_type.upper()}: {e}")
             return False
         
         if returncode == 0:
             output_file = os.path.splitext(puml_file)[0] + '.' + file_type
             if os.path.exists(output_file):
-                print("PlantUML Gen: {} создан: {}".format(file_type.upper(), output_file))
+                print(f"PlantUML Gen: {file_type.upper()} создан: {output_file}")
                 return True
             else:
-                self._add_warning("{} файл не создан".format(file_type.upper()))
+                self._add_warning(f"{file_type.upper()} файл не создан")
                 return False
         else:
             error_msg = stderr.strip() if stderr else "Неизвестная ошибка"
-            self._add_warning("PlantUML ошибка {}: {}".format(file_type.upper(), error_msg))
+            self._add_warning(f"PlantUML ошибка {file_type.upper()}: {error_msg}")
             return False
 
     def generate_online(self, puml_content, puml_file, file_type):
         """Генерирует файл через онлайн сервис"""
         try:
-            print("PlantUML Gen: {} генерируется онлайн...".format(file_type.upper()))
+            print(f"PlantUML Gen: {file_type.upper()} генерируется онлайн...")
             
-            generator = PlantumlOnlineGen()
-            if file_type == 'png':
-                data = generator.generate_png(puml_content)
-            elif file_type == 'svg':
-                data = generator.generate_svg(puml_content)
-            else:
-                self._add_warning("Неподдерживаемый онлайн тип: {}".format(file_type))
-                return False
+            gen = PlantumlOnlineGen()
+            data = gen.generate_png(puml_content) if file_type == 'png' else gen.generate_svg(puml_content)
             
             output_file = os.path.splitext(puml_file)[0] + '.' + file_type
             with open(output_file, 'wb') as f:
                 f.write(data)
             
-            print("PlantUML Gen: {} создан онлайн: {}".format(file_type.upper(), output_file))
+            print(f"PlantUML Gen: {file_type.upper()} создан онлайн: {output_file}")
             return True
             
         except Exception as e:
-            self._add_warning("Онлайн ошибка {}: {}".format(file_type.upper(), e))
+            self._add_warning(f"Онлайн ошибка {file_type.upper()}: {e}")
             return False
             
-    def _add_links(self, links, name_to_id, all_locs, id_to_name, format_str, link_type):
+    def _add_links(self, links, name_to_id, all_locs, id_to_name, fmt, link_type):
         """Универсальный метод добавления связей"""
         parts = []
-        for source_id, target, label in links:
+        for link_data in links:
+            # Защита от неполных данных
+            if len(link_data) < 3:
+                continue
+            source_id, target, label = link_data
             target_id = self._resolve_target(target, name_to_id, all_locs)
             
             if target_id is not None:
                 if link_type == "btn":
-                    if label == "":  # Совсем пустая - синяя стрелка без текста
-                        parts.append(EMPTY_BTN_FORMAT.format(source_id, target_id))
-                    else:  # Есть текст (включая пробелы) - обычная стрелка
+                    if label == "":  # Пустая - синяя стрелка
+                        parts.append(f"{source_id} -[{BLUE_COLOR}]-> {target_id}\n")
+                    else:  # С текстом - обычная
                         clean_label = self._limit_text(label, BTN_LIMIT)
-                        parts.append(format_str.format(source_id, target_id, clean_label))
+                        parts.append(fmt.format(source_id, target_id, clean_label))
                 else:  # goto
-                    parts.append(format_str.format(source_id, target_id, link_type))
+                    parts.append(fmt.format(source_id, target_id, "goto"))
             else:
-                self.has_phantom_links = True  # Устанавливаем флаг
+                self.has_phantom_links = True
                 phantom_label = self._limit_text(label if link_type == "btn" and label else target, BTN_LIMIT)
-                # Use appropriate phantom format based on label content
                 if phantom_label == "":
-                    parts.append(PHANTOM_EMPTY_FORMAT.format(source_id))
+                    parts.append(f"{source_id} -[{BLUE_COLOR},dotted]-> PHANTOM_NODE_URQ\n")
                 else:
-                    parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
+                    parts.append(f"{source_id} -[{PHANTOM_ARROW_COLOR},dotted]-> PHANTOM_NODE_URQ : ({phantom_label})\n")
                 loc_name = id_to_name.get(source_id, "неизвестная")
-                self._add_warning("Локация '{}' для {} из '{}' не найдена".format(target, link_type, loc_name))
+                self._add_warning(f"Локация '{target}' для {link_type} из '{loc_name}' не найдена")
         return ''.join(parts)
 
     def _add_auto_links(self, auto_links):
         """Добавляет автосвязи"""
-        parts = []
-        for source_id, target_id, _ in auto_links:
-            parts.append(AUTO_FORMAT.format(source_id, target_id))
-        return ''.join(parts)
+        return ''.join(AUTO_FORMAT.format(source_id, target_id) for source_id, target_id, _ in auto_links)
 
     def _add_proc_links(self, proc_links, name_to_id, all_locs, id_to_name):
         """Добавляет proc связи"""
@@ -295,13 +283,14 @@ class PlantumlGen:
             target_id = self._resolve_target(target, name_to_id, all_locs)
             
             if target_id is not None:
-                parts.append(PROC_FORMAT.format(source_id, target_id))
+                # Fixed: Now providing 4 arguments to match PROC_FORMAT (source->target, target->source dotted)
+                parts.append(PROC_FORMAT.format(source_id, target_id, target_id, source_id))
             else:
-                self.has_phantom_links = True  # Устанавливаем флаг
+                self.has_phantom_links = True
                 phantom_label = self._limit_text(target, BTN_LIMIT)
-                parts.append(PHANTOM_FORMAT.format(source_id, phantom_label))
+                parts.append(f"{source_id} -[{PHANTOM_ARROW_COLOR},dotted]-> PHANTOM_NODE_URQ : ({phantom_label})\n")
                 loc_name = id_to_name.get(source_id, "неизвестная")
-                self._add_warning("Локация '{}' для proc из '{}' не найдена".format(target, loc_name))
+                self._add_warning(f"Локация '{target}' для proc из '{loc_name}' не найдена")
         return ''.join(parts)
 
     def _resolve_target(self, target_name, name_to_id, all_locs):
@@ -319,17 +308,13 @@ class PlantumlGen:
 
     def _limit_text(self, text, max_len):
         """Ограничивает длину текста для диаграммы"""
-        if not text:
-            return ""
-        
-        if len(text) > max_len:
-            return text[:max_len].strip() + "..."
-        
-        return text
+        if not text or len(text) <= max_len:
+            return text or ""
+        return text[:max_len].strip() + "..."
 
     def _add_warning(self, message):
         """Добавляет предупреждение"""
-        self.warnings.append("PlantUML Gen Warning: {}".format(message))
+        self.warnings.append(f"PlantUML Gen Warning: {message}")
 
     def get_warnings(self):
         """Возвращает предупреждения"""
