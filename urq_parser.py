@@ -16,7 +16,7 @@ PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
 PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
 TEXT_EXTRACTION = re.compile(r"^(pln|p)\s(.*)$", re.MULTILINE)
-COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.MULTILINE)
+COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.MULTILINE | re.DOTALL)
 
 class Loc: # Без изменений
     def __init__(self, id, name, desc, line):
@@ -253,7 +253,7 @@ class UrqParser:
         for m in INLINE_BTN_PATTERN.finditer(text): # m - match object
             desc_text = m.group(1) if m.group(1) is not None else "" # desc_text
             target_text = m.group(2) if m.group(2) is not None else desc_text # target_text
-            
+
             # Если цель не указана явно (формат [[desc]]), используем desc как target
             # Уже обработано в target_text = m.group(2) if m.group(2) is not None else desc_text
             # desc_stripped = desc_text.strip()
@@ -264,6 +264,13 @@ class UrqParser:
             
     def _add_link_with_cycle_check(self, loc, target, l_type, label): # l_type - link_type
         """Добавляет связь с проверкой на цикл"""
+
+        # Стрипаем % или ! с начала ссылки
+        # Вообще это обозначение немедленных действий ! и меню в кнопке %, но пока у нас нет таких флагов
+        target = target.strip()
+        if target and target[0] in '%!':
+            target = target[1:]
+
         if target == loc.name: loc.cycle = True
         
         cl_label = "" # clean_label
