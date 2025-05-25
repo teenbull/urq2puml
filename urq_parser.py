@@ -161,16 +161,20 @@ class UrqParser:
 
         for l in locs: # l - loc object
             res_links = [] # resolved_links
-            for link_data in l.links: # link_data - (target, type, label) or (idx, type, label)
+            for link_data in l.links: # link_data - (target, type, label, is_menu, is_local) or (idx, type, label, is_menu, is_local)
                 if isinstance(link_data[0], int):  # Автосвязь по индексу
-                    idx, l_type, label = link_data # auto_idx, link_type
+                    idx, l_type, label = link_data[:3] # auto_idx, link_type
+                    is_menu = link_data[3] if len(link_data) > 3 else False
+                    is_local = link_data[4] if len(link_data) > 4 else False
                     if idx < len(locs):
                         t_loc = locs[idx] # target_loc
-                        res_links.append((t_loc.id, t_loc.name, l_type, label, False))
+                        res_links.append((t_loc.id, t_loc.name, l_type, label, False, is_menu, is_local))
                     # else: можно добавить warning для некорректного индекса автосвязи
                     continue
                 
                 t_name, l_type, label = link_data[:3] # target_name, link_type
+                is_menu = link_data[3] if len(link_data) > 3 else False
+                is_local = link_data[4] if len(link_data) > 4 else False
                 t_id, is_ph = None, True # target_id, is_phantom
                 
                 if t_name == l.name:  # Самоссылка
@@ -181,7 +185,7 @@ class UrqParser:
                     t_id, is_ph = d_map[t_name], False
                 # Если t_id все еще None, то это фантомная ссылка
                 
-                res_links.append((t_id, t_name, l_type, label, is_ph))
+                res_links.append((t_id, t_name, l_type, label, is_ph, is_menu, is_local))
             l.links = res_links
             
     def _prep_content(self, content):
@@ -264,12 +268,17 @@ class UrqParser:
             
     def _add_link_with_cycle_check(self, loc, target, l_type, label): # l_type - link_type
         """Добавляет связь с проверкой на цикл"""
-
-        # Стрипаем % или ! с начала ссылки
-        # Вообще это обозначение немедленных действий ! и меню в кнопке %, но пока у нас нет таких флагов
+        # Стрипаем % или ! с начала ссылки и устанавливаем флаги
+        # % - меню в кнопке, ! - немедленные действия
         target = target.strip()
-        if target and target[0] in '%!':
-            target = target[1:]
+        is_menu = is_local = False
+        
+        if target:
+            prefix = target[0]
+            if prefix in '%!':
+                target = target[1:] # Убираем префикс из имени цели
+                is_menu = (prefix == '%')
+                is_local = (prefix == '!')
 
         if target == loc.name: loc.cycle = True
         
@@ -281,8 +290,11 @@ class UrqParser:
             elif not stripped_label and label: cl_label = " " # Строка из пробелов
             else: cl_label = self._clean_button_text(stripped_label)
         
-        loc.links.append((target, l_type, cl_label))
-            
+        # Appending a 5-element tuple: (target_name, link_type, label, is_menu, is_local)
+        # is_phantom will be determined later in _resolve_target_ids
+        loc.links.append((target, l_type, cl_label, is_menu, is_local))
+
+                 
     def _clean_button_text(self, text):
         """Очищает текст кнопки"""
         if not text: return ""

@@ -26,6 +26,8 @@ DOUBLE_COLOR = "#ffcccb"
 END_COLOR = "#d0f0d0"
 BLUE_COLOR = "#6fb4d4"
 PHANTOM_ARROW_COLOR = "#CD5C5C"
+BTN_MENU_EMPTY_COLOR = "#FFD700" # Золотой для пустых кнопок-меню
+BTN_LOCAL_EMPTY_COLOR = "#FF6347" # Томатный для пустых локальных кнопок
 
 # PlantUML элементы
 PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
@@ -52,6 +54,13 @@ PROC_FORMAT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
 STATE_FORMAT = 'state "{}" as {}'
 STATE_DESC_FORMAT = '{}: {}\n'
 LOST_DESC_FORMAT = '{}: [Дубликат метки, строка {}]\\n\\n{}\n'
+
+BTN_DEFAULT_EMPTY_FMT = f"{{}} -[{BLUE_COLOR}]-> {{}}\n"
+BTN_MENU_EMPTY_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}}\n"
+BTN_LOCAL_EMPTY_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}}\n"
+BTN_DEFAULT_LABELED_FMT = "{} --> {} : ({})\n"
+BTN_MENU_LABELED_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}} : ({{}})\n"
+BTN_LOCAL_LABELED_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}} : ({{}})\n"
 # ----------------------------------------------------------------------
 
 class PlantumlOnlineGen:
@@ -155,26 +164,62 @@ class PlantumlGen:
         
         for loc in locs:
             for link in loc.links:
-                target_id, target_name, link_type, label, is_phantom = link
+                target_id, target_name, link_type, label, is_phantom, is_menu, is_local = link
                 
                 if is_phantom:
                     parts.append(self._format_phantom_link(loc.id, target_name, link_type, label))
                     self._add_warning(f"Локация '{target_name}' для {link_type} из '{loc.name}' не найдена")
                 else:
-                    parts.append(self._format_link(loc.id, target_id, link_type, label))
+                    # FIXED: Pass is_menu and is_local parameters
+                    parts.append(self._format_link(loc.id, target_id, link_type, label, is_menu, is_local))
         
         return ''.join(parts)
 
-    def _format_link(self, source_id, target_id, link_type, label):
-        """Форматирует обычную связь"""
+    def _format_link(self, source_id, target_id, link_type, label, is_menu=False, is_local=False):
+        """Форматирует обычную связь, включая спец. цвета для меню и локальных кнопок"""
+        # Предполагается, что эти ЦВЕТОВЫЕ КОНСТАНТЫ определены вверху файла:
+        # BLUE_COLOR = "#6fb4d4"  (для пустых кнопок по умолчанию)
+        # BTN_MENU_EMPTY_COLOR = "#FFD700"  (например, Золотой для кнопок-меню)
+        # BTN_LOCAL_EMPTY_COLOR = "#FF6347" (например, Томатный для локальных кнопок)
+        # (Цвета для кнопок-меню и локальных кнопок с текстом будут такими же, как для пустых)
+
+        # И эти ФОРМАТЫ СВЯЗЕЙ также определены вверху:
+        # --- Для кнопок БЕЗ ТЕКСТА ---
+        # BTN_DEFAULT_EMPTY_FMT = f"{{}} -[{BLUE_COLOR}]-> {{}}\n"
+        # BTN_MENU_EMPTY_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}}\n"
+        # BTN_LOCAL_EMPTY_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}}\n"
+        #
+        # --- Для кнопок С ТЕКСТОМ ---
+        # BTN_DEFAULT_LABELED_FMT = "{} --> {} : ({})\n" 
+        #   (Это ваш старый BTN_FORMAT, использует стандартный цвет стрелки)
+        # BTN_MENU_LABELED_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}} : ({{}})\n"
+        #   (Использует тот же цвет, что и BTN_MENU_EMPTY_COLOR, но с местом для текста)
+        # BTN_LOCAL_LABELED_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}} : ({{}})\n"
+        #   (Использует тот же цвет, что и BTN_LOCAL_EMPTY_COLOR, но с местом для текста)
+        #
+        # AUTO_FORMAT, GOTO_FORMAT, PROC_FORMAT - остаются как есть.
+
         if link_type == "auto":            
             return AUTO_FORMAT.format(source_id, target_id)
         elif link_type == "btn":
-            if label == "":  # Пустая - синяя стрелка
-                return f"{source_id} -[{BLUE_COLOR}]-> {target_id}\n"
-            else:  # С текстом - обычная
+            if label == "":  # Пустая кнопка, без текста на стрелке
+                if is_menu:
+                    return BTN_MENU_EMPTY_FMT.format(source_id, target_id)
+                elif is_local:
+                    return BTN_LOCAL_EMPTY_FMT.format(source_id, target_id)
+                else: # Обычная пустая кнопка
+                    return BTN_DEFAULT_EMPTY_FMT.format(source_id, target_id)
+            else:  # Кнопка с текстом
                 clean_label = self._limit_text(label, BTN_LIMIT)
-                return BTN_FORMAT.format(source_id, target_id, clean_label)
+                
+                if is_menu:
+                    prefixed_label = "% " + clean_label # Менюшный префикс
+                    return BTN_MENU_LABELED_FMT.format(source_id, target_id, prefixed_label)
+                elif is_local:
+                    prefixed_label = "! " + clean_label # Локальный префикс
+                    return BTN_LOCAL_LABELED_FMT.format(source_id, target_id, prefixed_label)
+                else: # Обычная кнопка с текстом
+                    return BTN_DEFAULT_LABELED_FMT.format(source_id, target_id, clean_label)
         elif link_type == "goto":
             return GOTO_FORMAT.format(source_id, target_id)
         elif link_type == "proc":
