@@ -188,6 +188,10 @@ class UrqParser:
         """Предобработка контента"""
         content = COMMENTS_REMOVAL.sub('', content)        
         content = re.sub(r'\n\s*_', '', content)
+
+        # меняем кавычки "" на '' - исключительно для puml!
+        content = re.sub(r'"', '\'', content)
+        
         lines = []
         for line_text in content.split('\n'): # line_text - для ясности
             if re.match(r'^\s*if\b', line_text, re.IGNORECASE):

@@ -1,4 +1,5 @@
 # PlantUML Generator - создает PlantUML диаграммы и файлы
+import sublime
 import os
 import subprocess
 import string
@@ -234,6 +235,7 @@ class PlantumlGen:
             returncode = process.returncode
         except FileNotFoundError:
             self._add_warning("Java не найдена в PATH")
+            sublime.error_message("Java не найдена в PATH, попробуйте установить и прописать.")
             return False
         except Exception as e:
             self._add_warning(f"Ошибка PlantUML для {file_type.upper()}: {e}")
@@ -269,6 +271,7 @@ class PlantumlGen:
             
         except Exception as e:
             self._add_warning(f"Онлайн ошибка {file_type.upper()}: {e}")
+            sublime.error_message("Ошибка при попытке онлайн генерации. Возможно, файл слишком велик - попробуйте оффлайн способ (см. readme.md).")
             return False
 
     def _limit_text(self, text, max_len):
