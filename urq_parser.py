@@ -114,15 +114,15 @@ class UrqParser:
 
         # Остальная логика метода без изменений, т.к. она корректна
         # и соответствует требованиям пользователя
-        proc_texts = set() # processed_texts
+        # proc_texts = set() # processed_texts
         pln_found = False
         for m in TEXT_EXTRACTION.finditer(l_cont): # m - match object
             t_type = m.group(1)  # text_type
             text = m.group(2).strip()
             if t_type == 'pln':
                 pln_found = True
-            if (t_type == 'pln' or not pln_found) and text and text not in proc_texts:
-                proc_texts.add(text)
+            if (t_type == 'pln' or not pln_found) and text:
+                # proc_texts.add(text)
                 self._extract_inline_buttons(text, loc)
 
         for m in BTN_PATTERN.finditer(l_cont):

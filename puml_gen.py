@@ -44,9 +44,9 @@ skinparam state {{
 START_LOC = "[*] --> 0\n"
 
 # Форматы связей
-AUTO_FORMAT = "{} -[dotted]-> {}\n"
+AUTO_FORMAT = "{} -[dashed]-> {}\n"
 BTN_FORMAT = "{} --> {} : ({})\n" 
-GOTO_FORMAT = "{} --> {} : [{}]\n"
+GOTO_FORMAT = "{} --> {} : [goto]\n"
 PROC_FORMAT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
 STATE_FORMAT = 'state "{}" as {}'
 STATE_DESC_FORMAT = '{}: {}\n'
@@ -175,7 +175,7 @@ class PlantumlGen:
                 clean_label = self._limit_text(label, BTN_LIMIT)
                 return BTN_FORMAT.format(source_id, target_id, clean_label)
         elif link_type == "goto":
-            return GOTO_FORMAT.format(source_id, target_id, "goto")
+            return GOTO_FORMAT.format(source_id, target_id)
         elif link_type == "proc":
             return PROC_FORMAT.format(source_id, target_id, target_id, source_id)
         
