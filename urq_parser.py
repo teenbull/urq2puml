@@ -91,16 +91,45 @@ class UrqParser:
             self._extract_links_and_flags(loc, l_cont, matches, i) 
         
         self._resolve_target_ids(locs) # Резолвим имена целей в ID
+    
+        # # Помечаем концевые локации (концовки)
+        # s_ids = {l.id for l in locs if l.links} # source_ids - локации с исходящими связями
+        # # Собираем ID всех реальных целей proc команд (фантомные не считаем)
+        # proc_t_ids = {link[0] for l in locs for link in l.links if link[2] == "proc" and not link[4]} # proc_target_ids
+        # menu_t_ids = {link[0] for l in locs for link in l.links if link[5] == "menu" and not link[5]} # menu_target_ids
+        # local_t_ids = {link[0] for l in locs for link in l.links if link[6] == "local" and not link[6]} # local_target_ids
         
-        # Помечаем концевые локации (концовки)
-        s_ids = {l.id for l in locs if l.links} # source_ids - локации с исходящими связями
-        # Собираем ID всех реальных целей proc команд (фантомные не считаем)
-        proc_t_ids = {link[0] for l in locs for link in l.links if link[2] == "proc" and not link[4]} # proc_target_ids
+        # for l_obj in locs: # l_obj - loc object
+        #     # Концовка = нет исходящих связей + не дубликат + не цель команды proc
+        #     if l_obj.id not in s_ids and not l_obj.dup and l_obj.id not in proc_t_ids  and l_obj.id not in menu_t_ids  and l_obj.id not in local_t_ids:
+        #         l_obj.end = True
+
+        # Помечаем концовки
+        # Локация считается источником, если у нее есть хотя бы одна НЕ-локальная связь.
+        s_ids = {l.id for l in locs if any(not link[6] for link in l.links)} # source_ids - локации с исходящими НЕ-локальными связями
+        
+        # Собираем ID всех реальных (не фантомных) целей команд proc
+        proc_t_ids = {link[0] for l in locs for link in l.links if link[0] is not None and link[2] == "proc" and not link[4]} 
+        
+        # Собираем ID всех реальных (не фантомных) целей локальных связей
+        local_targets = {link[0] for l_obj_src in locs for link in l_obj_src.links if link[0] is not None and not link[4] and link[6]} # link[6] is is_local
+        
+        # Собираем ID всех реальных (не фантомных) целей меню-связей
+        menu_targets = {link[0] for l_obj_src in locs for link in l_obj_src.links if link[0] is not None and not link[4] and link[5]} # link[5] is is_menu
         
         for l_obj in locs: # l_obj - loc object
-            # Концовка = нет исходящих связей + не дубликат + не цель команды proc
-            if l_obj.id not in s_ids and not l_obj.dup and l_obj.id not in proc_t_ids:
-                l_obj.end = True
+            # Концовка = (нет исходящих НЕ-локальных связей) И 
+            #             (не дубликат) И 
+            #             (не цель команды proc) И
+            #             (не цель локальной связи) И
+            #             (не цель меню-связи)
+            if (l_obj.id not in s_ids and
+                    not l_obj.dup and
+                    l_obj.id not in proc_t_ids and
+                    l_obj.id not in local_targets and
+                    l_obj.id not in menu_targets):
+                l_obj.end = True        
+        
         return locs
 
     def _extract_links_and_flags(self, loc, l_cont, all_matches, loc_idx):
