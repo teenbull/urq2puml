@@ -28,7 +28,6 @@ BLUE_COLOR = "#6fb4d4"
 PHANTOM_ARROW_COLOR = "#CD5C5C"
 BTN_MENU_COLOR = "dotted" # для кнопок-меню
 BTN_LOCAL_COLOR = "#cccccc,bold" # для локальных кнопок
-# BTN_LOCAL_COLOR = "#d0f0d0,bold" # для локальных кнопок
 
 # PlantUML элементы
 PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
@@ -49,8 +48,6 @@ sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12">
   <path d="M1.2 0 C0.4 0 0 0.4 0 1.2 L0 12 L4 9 L8 12 L8 1.2 C8 0.4 7.6 0 6.8 0 Z" fill="#CD5C5C" />
 </svg>
 """
-# <path d="M1.5 0 C0.5 0 0 0.5 0 1.5 L0 14 L5 10.5 L10 14 L10 1.5 C10 0.5 9.5 0 8.5 0 Z" fill="#7cc97c"/>
-# <path d="M2 0 C1 0 0 1 0 2 L0 16 L6 12 L12 16 L12 2 C12 1 11 0 10 0 Z" fill="#CD5C5C"/>
 START_LOC = "[*] --> 0\n"
 
 # Форматы связей

@@ -18,7 +18,7 @@ PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
 TEXT_EXTRACTION = re.compile(r"^(pln|p)\s(.*)$", re.MULTILINE)
 COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.MULTILINE | re.DOTALL)
 
-class Loc: # Без изменений
+class Loc: 
     def __init__(self, id, name, desc, line):
         self.id = id
         self.name = name
@@ -27,7 +27,9 @@ class Loc: # Без изменений
         self.dup = False
         self.cycle = False
         self.end = False
-        self.links = []  # [(target_id, target_name, type, label, is_phantom)]
+        self.non_end = False # не может быть концовкой если на нее ссылается proc, local или menu
+        # используется для установки флага end, чтобы не пересматривать перед этим все ссылки заново
+        self.links = []  # [(target_id, target_name, type, label, is_phantom, is_manu, is_local)]
 
 class UrqParser:
     def __init__(self):
@@ -104,32 +106,20 @@ class UrqParser:
         #     if l_obj.id not in s_ids and not l_obj.dup and l_obj.id not in proc_t_ids  and l_obj.id not in menu_t_ids  and l_obj.id not in local_t_ids:
         #         l_obj.end = True
 
-        # Помечаем концовки
-        # Локация считается источником, если у нее есть хотя бы одна НЕ-локальная связь.
-        s_ids = {l.id for l in locs if any(not link[6] for link in l.links)} # source_ids - локации с исходящими НЕ-локальными связями
-        
-        # Собираем ID всех реальных (не фантомных) целей команд proc
-        proc_t_ids = {link[0] for l in locs for link in l.links if link[0] is not None and link[2] == "proc" and not link[4]} 
-        
-        # Собираем ID всех реальных (не фантомных) целей локальных связей
-        local_targets = {link[0] for l_obj_src in locs for link in l_obj_src.links if link[0] is not None and not link[4] and link[6]} # link[6] is is_local
-        
-        # Собираем ID всех реальных (не фантомных) целей меню-связей
-        menu_targets = {link[0] for l_obj_src in locs for link in l_obj_src.links if link[0] is not None and not link[4] and link[5]} # link[5] is is_menu
-        
-        for l_obj in locs: # l_obj - loc object
+        # Помечаем концевые локации (концовки)
+        # s_ids: локации с исходящими НЕ-локальными связями (т.е. не являются концом из-за этого)
+        s_ids = {l_obj.id for l_obj in locs if any(not link[6] for link in l_obj.links)} # link[6] is is_local
+
+        for l_obj in locs:
             # Концовка = (нет исходящих НЕ-локальных связей) И 
             #             (не дубликат) И 
-            #             (не цель команды proc) И
-            #             (не цель локальной связи) И
-            #             (не цель меню-связи)
+            #             (не является целью спец. связи типа proc, local, или menu)
             if (l_obj.id not in s_ids and
                     not l_obj.dup and
-                    l_obj.id not in proc_t_ids and
-                    l_obj.id not in local_targets and
-                    l_obj.id not in menu_targets):
-                l_obj.end = True        
-        
+                    not l_obj.non_end): # Check the new flag
+                l_obj.end = True
+
+
         return locs
 
     def _extract_links_and_flags(self, loc, l_cont, all_matches, loc_idx):
@@ -174,7 +164,7 @@ class UrqParser:
             else: self._add_warning(f"Пустая цель proc из '{loc.name}'")
 
     def _resolve_target_ids(self, locs):
-        """Резолвим имена целей в ID"""
+        """Резолвим имена целей в ID и помечаем цели спец. связей"""
         # Маппинг имен не-дубликатов на их ID
         n_map = {l.name: l.id for l in locs if not l.dup and l.name} # name_to_id
         
@@ -187,7 +177,10 @@ class UrqParser:
             if l_obj.dup and l_obj.name and l_obj.name not in found_dup_names:
                 d_map[l_obj.name] = l_obj.id
                 found_dup_names.add(l_obj.name)
-
+        
+        # Создаем маппинг ID -> loc для быстрого поиска
+        id_to_loc = {l.id: l for l in locs}
+        
         for l in locs: # l - loc object
             res_links = [] # resolved_links
             for link_data in l.links: # link_data - (target, type, label, is_menu, is_local) or (idx, type, label, is_menu, is_local)
@@ -198,6 +191,10 @@ class UrqParser:
                     if idx < len(locs):
                         t_loc = locs[idx] # target_loc
                         res_links.append((t_loc.id, t_loc.name, l_type, label, False, is_menu, is_local))
+                        
+                        # Устанавливаем non_end флаг для целевой локации
+                        if l_type == 'proc' or is_local or is_menu:
+                            t_loc.non_end = True
                     # else: можно добавить warning для некорректного индекса автосвязи
                     continue
                 
@@ -215,8 +212,15 @@ class UrqParser:
                 # Если t_id все еще None, то это фантомная ссылка
                 
                 res_links.append((t_id, t_name, l_type, label, is_ph, is_menu, is_local))
-            l.links = res_links
+                
+                # Устанавливаем non_end флаг для целевой локации (если она существует)
+                if t_id is not None and (l_type == 'proc' or is_local or is_menu):
+                    target_loc = id_to_loc.get(t_id)
+                    if target_loc:
+                        target_loc.non_end = True
             
+            l.links = res_links
+                
     def _prep_content(self, content):
         """Предобработка контента"""
         content = COMMENTS_REMOVAL.sub('', content)        
