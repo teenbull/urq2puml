@@ -186,7 +186,7 @@ class PlantumlGen:
         return ''.join(parts)
 
     def _format_link(self, source_id, target_id, link_type, label, is_menu=False, is_local=False):
-        """Форматирует обычную связь, включая спец. цвета для меню и локальных кнопок"""
+        """Форматирует обычные связи, включая спец. цвета для меню и локальных кнопок"""
 
         if link_type == "auto":            
             return AUTO_FMT.format(source_id, target_id)
