@@ -28,7 +28,6 @@ BLUE_COLOR = "#6fb4d4"
 PHANTOM_ARROW_COLOR = "#CD5C5C"
 BTN_MENU_COLOR = "dotted" # для кнопок-меню
 BTN_LOCAL_COLOR = "#cccccc,bold" # для локальных кнопок
-DOT_COLOR = "#828282" # серый для стартовых/конечных точек
 
 # PlantUML элементы
 PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
@@ -42,14 +41,15 @@ skinparam state {{
     FontColor {FONT_COLOR}
     ArrowFontColor {ARROW_FONT_COLOR}
 }}
-
 sprite $menu_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8.2 11.2">
-  <path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#575757"/>
+  <path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#7d7d7d"/>
 </svg>
 sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12">
   <path d="M1.2 0 C0.4 0 0 0.4 0 1.2 L0 12 L4 9 L8 12 L8 1.2 C8 0.4 7.6 0 6.8 0 Z" fill="#CD5C5C" />
 </svg>
 """
+
+DOT_COLOR = "#828282" # серый для стартовой точки
 START_LOC = f"[*] {DOT_COLOR} --> 0 \n"
 
 # Форматы связей
@@ -67,10 +67,8 @@ PROC_FMT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
 
 STATE_FMT = 'state "{}" as {}'
 STATE_CYCLE_FMT = f'state "{{}}" as {{}} {CYCLE_COLOR}' # For cycle states
-STATE_DOUBLE_FMT = f'state "{{}}" as {{}} {DOUBLE_COLOR}'
 STATE_END_FMT = f'state "{{}}" as {{}} {END_COLOR}'   # For end states
 STATE_DESC_FMT = '{}: {}\n'
-END_ARROW_FMT = f"{{}} --> [*] {DOT_COLOR}\n"
 # ----------------------------------------------------------------------
 
 class PlantumlOnlineGen:
@@ -125,21 +123,15 @@ class PlantumlGen:
                 clean_name = self._limit_text(loc.name, LOC_LIMIT)
                 clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
                 
-                state_line_fmt = STATE_FMT # Формат по умолчанию
-                
-                # additional_end_arrow = ""   # для строки конечной точки loc.id --> [*]
-                
+                state_line_fmt = STATE_FMT # Default format
                 if loc.cycle:
                     state_line_fmt = STATE_CYCLE_FMT
-                # elif loc.end: # 'elif' гарантирует, что цикл имеет приоритет, если оба условия истинны
-                    # state_line_fmt = STATE_END_FMT  # Используем формат для цвета конечной точки
-                    # additional_end_arrow = END_ARROW_FMT.format(loc.id) # Готовим стрелку к [*]
+                elif loc.end: # 'elif' ensures cycle takes precedence if both somehow true
+                    state_line_fmt = STATE_END_FMT
                 
                 state_line = state_line_fmt.format(clean_name, loc.id)
                 
                 content_parts.extend([state_line + "\n", STATE_DESC_FMT.format(loc.id, clean_desc)])
-                # if additional_end_arrow: # Если это конечное состояние, добавляем его стрелку к [*]
-                    # content_parts.append(additional_end_arrow)
 
         # Дубликаты
         for loc in locs:
@@ -147,9 +139,7 @@ class PlantumlGen:
                 clean_name = self._limit_text(loc.name, LOC_LIMIT)
                 clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
                 
-                # Используем STATE_DOUBLE_FMT для единообразия в определении дублирующих состояний
-                state_line = STATE_DOUBLE_FMT.format(clean_name, loc.id)
-                # DOUBLE_FMT (ваша существующая константа) используется для формата описания дубликатов
+                state_line = f'state "{clean_name}" as {loc.id} {DOUBLE_COLOR}'
                 content_parts.extend([state_line + "\n", DOUBLE_FMT.format(loc.id, loc.line, clean_desc)])
 
         # Старт
