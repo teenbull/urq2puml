@@ -26,15 +26,15 @@ DOUBLE_COLOR = "#ffcccb"
 END_COLOR = "#d0f0d0"
 BLUE_COLOR = "#6fb4d4"
 PHANTOM_ARROW_COLOR = "#CD5C5C"
-BTN_MENU_EMPTY_COLOR = "#FFD700" # Золотой для пустых кнопок-меню
-BTN_LOCAL_EMPTY_COLOR = "#FF6347" # Томатный для пустых локальных кнопок
+BTN_MENU_COLOR = "dotted" # для кнопок-меню
+BTN_LOCAL_COLOR = "#cccccc,bold" # для локальных кнопок
+# BTN_LOCAL_COLOR = "#d0f0d0,bold" # для локальных кнопок
 
 # PlantUML элементы
 PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
   PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
 }}
 """
-
 SKIN_PARAMS = f"""skinparam stateArrowColor {ARROW_COLOR}
 skinparam state {{
     BackgroundColor {STATE_BG_COLOR}
@@ -42,25 +42,32 @@ skinparam state {{
     FontColor {FONT_COLOR}
     ArrowFontColor {ARROW_FONT_COLOR}
 }}
+sprite $menu_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8.2 11.2">
+  <path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#7d7d7d"/>
+</svg>
+sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12">
+  <path d="M1.2 0 C0.4 0 0 0.4 0 1.2 L0 12 L4 9 L8 12 L8 1.2 C8 0.4 7.6 0 6.8 0 Z" fill="#CD5C5C" />
+</svg>
 """
-
+# <path d="M1.5 0 C0.5 0 0 0.5 0 1.5 L0 14 L5 10.5 L10 14 L10 1.5 C10 0.5 9.5 0 8.5 0 Z" fill="#7cc97c"/>
+# <path d="M2 0 C1 0 0 1 0 2 L0 16 L6 12 L12 16 L12 2 C12 1 11 0 10 0 Z" fill="#CD5C5C"/>
 START_LOC = "[*] --> 0\n"
 
 # Форматы связей
-AUTO_FORMAT = "{} -[dashed]-> {}\n"
-BTN_FORMAT = "{} --> {} : ({})\n" 
-GOTO_FORMAT = "{} --> {} : [goto]\n"
-PROC_FORMAT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
-STATE_FORMAT = 'state "{}" as {}'
-STATE_DESC_FORMAT = '{}: {}\n'
-LOST_DESC_FORMAT = '{}: [Дубликат метки, строка {}]\\n\\n{}\n'
+AUTO_FMT = "{} -[dashed]-> {}\n"
 
-BTN_DEFAULT_EMPTY_FMT = f"{{}} -[{BLUE_COLOR}]-> {{}}\n"
-BTN_MENU_EMPTY_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}}\n"
-BTN_LOCAL_EMPTY_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}}\n"
-BTN_DEFAULT_LABELED_FMT = "{} --> {} : ({})\n"
-BTN_MENU_LABELED_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}} : ({{}})\n"
-BTN_LOCAL_LABELED_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}} : ({{}})\n"
+BTN_FMT = "{} --> {} : ({})\n" 
+BTN_EMPTY = f"{{}} -[{BLUE_COLOR}]-> {{}}\n"
+BTN_MENU = f"{{}} -[{BTN_MENU_COLOR}]-> {{}} : %({{}}) <$menu_icon> \n"
+BTN_LOCAL = f"{{}} -[{BTN_LOCAL_COLOR}]-> {{}} : !({{}}) <$local_icon> \n"
+
+DOUBLE_FMT = '{}: [Дубликат метки, строка {}]\\n\\n{}\n'
+
+GOTO_FMT = "{} --> {} : [goto]\n"
+PROC_FMT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
+
+STATE_FMT = 'state "{}" as {}'
+STATE_DESC_FMT = '{}: {}\n'
 # ----------------------------------------------------------------------
 
 class PlantumlOnlineGen:
@@ -115,13 +122,13 @@ class PlantumlGen:
                 clean_name = self._limit_text(loc.name, LOC_LIMIT)
                 clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
                 
-                state_line = STATE_FORMAT.format(clean_name, loc.id)
+                state_line = STATE_FMT.format(clean_name, loc.id)
                 if loc.cycle:
                     state_line += f" {CYCLE_COLOR}"
                 elif loc.end:
                     state_line += f" {END_COLOR}"
                 
-                content_parts.extend([state_line + "\n", STATE_DESC_FORMAT.format(loc.id, clean_desc)])
+                content_parts.extend([state_line + "\n", STATE_DESC_FMT.format(loc.id, clean_desc)])
 
         # Дубликаты
         for loc in locs:
@@ -130,7 +137,7 @@ class PlantumlGen:
                 clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
                 
                 state_line = f'state "{clean_name}" as {loc.id} {DOUBLE_COLOR}'
-                content_parts.extend([state_line + "\n", LOST_DESC_FORMAT.format(loc.id, loc.line, clean_desc)])
+                content_parts.extend([state_line + "\n", DOUBLE_FMT.format(loc.id, loc.line, clean_desc)])
 
         # Старт
         if any(loc.id == '0' for loc in locs):
@@ -177,53 +184,24 @@ class PlantumlGen:
 
     def _format_link(self, source_id, target_id, link_type, label, is_menu=False, is_local=False):
         """Форматирует обычную связь, включая спец. цвета для меню и локальных кнопок"""
-        # Предполагается, что эти ЦВЕТОВЫЕ КОНСТАНТЫ определены вверху файла:
-        # BLUE_COLOR = "#6fb4d4"  (для пустых кнопок по умолчанию)
-        # BTN_MENU_EMPTY_COLOR = "#FFD700"  (например, Золотой для кнопок-меню)
-        # BTN_LOCAL_EMPTY_COLOR = "#FF6347" (например, Томатный для локальных кнопок)
-        # (Цвета для кнопок-меню и локальных кнопок с текстом будут такими же, как для пустых)
-
-        # И эти ФОРМАТЫ СВЯЗЕЙ также определены вверху:
-        # --- Для кнопок БЕЗ ТЕКСТА ---
-        # BTN_DEFAULT_EMPTY_FMT = f"{{}} -[{BLUE_COLOR}]-> {{}}\n"
-        # BTN_MENU_EMPTY_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}}\n"
-        # BTN_LOCAL_EMPTY_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}}\n"
-        #
-        # --- Для кнопок С ТЕКСТОМ ---
-        # BTN_DEFAULT_LABELED_FMT = "{} --> {} : ({})\n" 
-        #   (Это ваш старый BTN_FORMAT, использует стандартный цвет стрелки)
-        # BTN_MENU_LABELED_FMT = f"{{}} -[{BTN_MENU_EMPTY_COLOR}]-> {{}} : ({{}})\n"
-        #   (Использует тот же цвет, что и BTN_MENU_EMPTY_COLOR, но с местом для текста)
-        # BTN_LOCAL_LABELED_FMT = f"{{}} -[{BTN_LOCAL_EMPTY_COLOR}]-> {{}} : ({{}})\n"
-        #   (Использует тот же цвет, что и BTN_LOCAL_EMPTY_COLOR, но с местом для текста)
-        #
-        # AUTO_FORMAT, GOTO_FORMAT, PROC_FORMAT - остаются как есть.
 
         if link_type == "auto":            
-            return AUTO_FORMAT.format(source_id, target_id)
+            return AUTO_FMT.format(source_id, target_id)
         elif link_type == "btn":
             if label == "":  # Пустая кнопка, без текста на стрелке
-                if is_menu:
-                    return BTN_MENU_EMPTY_FMT.format(source_id, target_id)
-                elif is_local:
-                    return BTN_LOCAL_EMPTY_FMT.format(source_id, target_id)
-                else: # Обычная пустая кнопка
-                    return BTN_DEFAULT_EMPTY_FMT.format(source_id, target_id)
+                return BTN_EMPTY.format(source_id, target_id)
             else:  # Кнопка с текстом
                 clean_label = self._limit_text(label, BTN_LIMIT)
-                
                 if is_menu:
-                    prefixed_label = "% " + clean_label # Менюшный префикс
-                    return BTN_MENU_LABELED_FMT.format(source_id, target_id, prefixed_label)
+                    return BTN_MENU.format(source_id, target_id, clean_label)
                 elif is_local:
-                    prefixed_label = "! " + clean_label # Локальный префикс
-                    return BTN_LOCAL_LABELED_FMT.format(source_id, target_id, prefixed_label)
+                    return BTN_LOCAL.format(source_id, target_id, clean_label)
                 else: # Обычная кнопка с текстом
-                    return BTN_DEFAULT_LABELED_FMT.format(source_id, target_id, clean_label)
+                    return BTN_FMT.format(source_id, target_id, clean_label)
         elif link_type == "goto":
-            return GOTO_FORMAT.format(source_id, target_id)
+            return GOTO_FMT.format(source_id, target_id)
         elif link_type == "proc":
-            return PROC_FORMAT.format(source_id, target_id, target_id, source_id)
+            return PROC_FMT.format(source_id, target_id, target_id, source_id)
         
         return ""
 
