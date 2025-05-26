@@ -88,7 +88,7 @@ PlantUML Gen Warning: Локация 'метка' для btn из '3' не на�
 
 ## Как установить?
 
-1. Скачиваете архив с **URQ2PUML**. 
+1. Скачиваете архив с **urq2puml**. 
 2. Распаковываете и кидаете его в папку с плагинами *Sublime Text*:
    - **Windows**: `%APPDATA%\Sublime Text\Packages\`
    - **Mac**: `~/Library/Application Support/Sublime Text/Packages/`
