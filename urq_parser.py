@@ -93,30 +93,17 @@ class UrqParser:
             self._extract_links_and_flags(loc, l_cont, matches, i) 
         
         self._resolve_target_ids(locs) # Резолвим имена целей в ID
-    
-        # # Помечаем концевые локации (концовки)
-        # s_ids = {l.id for l in locs if l.links} # source_ids - локации с исходящими связями
-        # # Собираем ID всех реальных целей proc команд (фантомные не считаем)
-        # proc_t_ids = {link[0] for l in locs for link in l.links if link[2] == "proc" and not link[4]} # proc_target_ids
-        # menu_t_ids = {link[0] for l in locs for link in l.links if link[5] == "menu" and not link[5]} # menu_target_ids
-        # local_t_ids = {link[0] for l in locs for link in l.links if link[6] == "local" and not link[6]} # local_target_ids
-        
-        # for l_obj in locs: # l_obj - loc object
-        #     # Концовка = нет исходящих связей + не дубликат + не цель команды proc
-        #     if l_obj.id not in s_ids and not l_obj.dup and l_obj.id not in proc_t_ids  and l_obj.id not in menu_t_ids  and l_obj.id not in local_t_ids:
-        #         l_obj.end = True
 
         # Помечаем концевые локации (концовки)
-        # s_ids: локации с исходящими НЕ-локальными связями (т.е. не являются концом из-за этого)
+        # s_ids: локации с исходящими НЕ-локальными связями (т.е. являются продолжением, а не концовкой)
         s_ids = {l_obj.id for l_obj in locs if any(not link[6] for link in l_obj.links)} # link[6] is is_local
 
         for l_obj in locs:
             # Концовка = (нет исходящих НЕ-локальных связей) И 
-            #             (не дубликат) И 
             #             (не является целью спец. связи типа proc, local, или menu)
             if (l_obj.id not in s_ids and
-                    not l_obj.dup and
-                    not l_obj.non_end): # Check the new flag
+                    # not l_obj.dup and # не является дубликатом?
+                    not l_obj.non_end): # проверка на флаг - не концовка (ставится для целей proc, is_local, is_menu)
                 l_obj.end = True
 
 
@@ -248,7 +235,7 @@ class UrqParser:
         try:
             with open(f_path, 'rb') as f:
                 sample = f.read(1024)
-            for enc in ['utf-8', 'cp1251']: # UTF-8 сначала
+            for enc in ['cp1251', 'utf-8']: # cp1251 сначала
                 try:
                     sample.decode(enc)
                     return enc
@@ -323,8 +310,8 @@ class UrqParser:
             elif not stripped_label and label: cl_label = " " # Строка из пробелов
             else: cl_label = self._clean_button_text(stripped_label)
         
-        # Appending a 5-element tuple: (target_name, link_type, label, is_menu, is_local)
-        # is_phantom will be determined later in _resolve_target_ids
+        # (target_name, link_type, label, is_menu, is_local)
+        # is_phantom вычисляется позже в _resolve_target_ids
         loc.links.append((target, l_type, cl_label, is_menu, is_local))
 
                  
