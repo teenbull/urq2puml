@@ -42,7 +42,7 @@ skinparam state {{
     ArrowFontColor {ARROW_FONT_COLOR}
 }}
 sprite $menu_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8.2 11.2">
-  <path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#7d7d7d"/>
+  <path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#3D3D3D"/>
 </svg>
 sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12">
   <path d="M1.2 0 C0.4 0 0 0.4 0 1.2 L0 12 L4 9 L8 12 L8 1.2 C8 0.4 7.6 0 6.8 0 Z" fill="#CD5C5C" />
