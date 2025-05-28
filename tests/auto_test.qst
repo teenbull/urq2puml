@@ -13,4 +13,6 @@ end
 :start
 
 
+:use_key
+:common_1
 ;Локация с автопереходом should be autolinked with Локация (line 4) which should be autolinked with Локация (line 6) which should be autolinked with Локация (line 8)
