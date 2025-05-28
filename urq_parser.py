@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# urq_parser.py
 # URQ Parser - извлекает структуру из URQ файлов
 import re
 import os
@@ -132,16 +133,16 @@ class UrqParser:
                 self._extract_inline_buttons(text, loc)
 
         # DEBUG: показываем что парсим
-        print(f"DEBUG: Parsing loc '{loc.name}', content: {repr(l_cont)}")
+        # print(f"DEBUG: Parsing loc '{loc.name}', content: {repr(l_cont)}")
         
         for m in BTN_PATTERN.finditer(l_cont):
             target = m.group(1).strip()
             raw_label = m.group(2)
             # DEBUG: показываем что захватили
-            print(f"DEBUG: BTN match - target: {repr(target)}, raw_label: {repr(raw_label)}")
+            # print(f"DEBUG: BTN match - target: {repr(target)}, raw_label: {repr(raw_label)}")
             
             label = raw_label.split('\n')[0].strip() if raw_label else ""
-            print(f"DEBUG: Final label after processing: {repr(label)}")
+            # print(f"DEBUG: Final label after processing: {repr(label)}")
             
             if target: 
                 self._add_link_with_cycle_check(loc, target, "btn", label)

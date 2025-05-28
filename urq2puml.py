@@ -1,3 +1,4 @@
+# urq2puml.py
 # Конвертер из URQ в граф PlantUML
 
 # ----------------------------------------------------------------------
@@ -14,7 +15,8 @@ import importlib
 
 modules_to_reload = [
     'URQ2PUML.urq_parser',
-    'URQ2PUML.puml_gen'
+    'URQ2PUML.puml_gen',
+    'URQ2PUML.stats',
 ]
 
 for module_name in modules_to_reload:
@@ -25,13 +27,15 @@ for module_name in modules_to_reload:
 try:
     from .urq_parser import UrqParser
     from .puml_gen import PlantumlGen
+    from .stats import get_stats
 except ImportError:
     from urq_parser import UrqParser
     from puml_gen import PlantumlGen
+    from .stats import get_stats
 
 class UrqToPlantumlCommand(sublime_plugin.TextCommand):
     """Основная команда плагина"""
-    def run(self, edit, png=False, svg=False, net=False):
+    def run(self, edit, png=False, svg=False, net=False, stats=False):
         current_file = self.view.file_name()
 
         if not current_file:
@@ -72,16 +76,39 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 if not result:
                     self.warnings.extend(parser.get_warnings())
                     return
-                
-                locs = result
+                                
                 self.warnings.extend(parser.get_warnings())
+
+                # --- Вывод статистики, если флаг stats установлен ---
+                if stats:
+                    stats_text = get_stats(result) 
+
+                    if stats_text:
+                        stats_view = self.view.window().new_file()
+                        stats_view.set_name(f"{os.path.basename(current_file)} - Статистика")
+                        stats_view.set_scratch(True)
+                        # Убедимся, что текст содержит символы новой строки для Sublime
+                        stats_text_for_view = stats_text.replace('\r\n', '\n').replace('\r', '\n')
+                        stats_view.run_command('insert', {'characters': stats_text_for_view})
+                        # stats_view.set_read_only(True)
+                        self.view.window().status_message(f"Статистика для {os.path.basename(current_file)} отображена.")
+                    else:
+                        self._add_warning("Не удалось сгенерировать текст статистики (пустая строка).")
+                    
+                    # Если ТОЛЬКО статистика, то выходим после ее отображения
+                    if not png and not svg:
+                        self._print_warnings()
+                        return 
 
                 # Генерируем PlantUML
                 puml_file = os.path.splitext(current_file)[0] + '.puml'
                 gen = PlantumlGen(PUML_JAR_PATH if not net else None)
-                puml_content = gen.generate_puml(locs, puml_file)
+                puml_content = gen.generate_puml(result, puml_file)
                 self.warnings.extend(gen.get_warnings())
-            
+
+                # get_stats(result)
+
+                
             if os.path.exists(puml_file):
                 # Не открывать лишний раз puml файл
                 if not png and not svg and not is_puml:
@@ -163,3 +190,6 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             for warning in self.warnings:
                 print(warning)
             print("=" * 61 + "\n")
+
+    # This function should be defined outside the UrqParser class
+    # It takes the list of Loc objects (the 'result' from parser.parse_file)

@@ -18,6 +18,11 @@
         "command": "urq_to_plantuml", 
         "args": {"png": true, "svg": true}
     },
+    {
+        "caption": "qst: посмотреть статистику квеста",
+        "command": "urq_to_plantuml",
+        "args": {"stats": true}
+    },         
     // {
     //     "caption": "qst: создать граф в png (онлайн)",
     //     "command": "urq_to_plantuml",

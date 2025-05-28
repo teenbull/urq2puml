@@ -44,7 +44,15 @@
                 "caption": "Онлайн: Конвертировать в png и svg",
                 "command": "urq_to_plantuml",
                 "args": {"png": true, "svg": true, "net": true}
-            }
+            },
+            {
+                "caption": "-"
+            },            
+            {
+                "caption": "Статистика Квеста (СК)",
+                "command": "urq_to_plantuml",
+                "args": {"stats": true}
+            },            
         ]
     }
 ]
