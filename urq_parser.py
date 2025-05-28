@@ -10,7 +10,9 @@ GOTO_PATTERN = re.compile(r'^\s*\bgoto\b', re.MULTILINE | re.IGNORECASE)
 PROC_PATTERN = re.compile(r'^\s*\bproc\b', re.MULTILINE | re.IGNORECASE)
 PLN_PATTERN = re.compile(r'^\s*pln\s*(.*)$', re.MULTILINE)
 P_PATTERN = re.compile(r'^\s*p\s*(.*)$', re.MULTILINE)
-BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', re.MULTILINE | re.IGNORECASE)
+# BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', re.MULTILINE | re.IGNORECASE)
+BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),([^\r\n]*?)(?=\r?\n|$)', re.MULTILINE | re.IGNORECASE)
+# BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),([^\n]*?)(?=\n|$)', re.MULTILINE | re.IGNORECASE)
 GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.MULTILINE | re.IGNORECASE)
 PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE)
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
@@ -117,28 +119,34 @@ class UrqParser:
         
         if not has_end and not has_goto:
             next_idx = loc_idx + 1
-            # Проверка по полному числу найденных потенциальных локаций (`all_matches`)
             if next_idx < len(all_matches):
                 loc.links.append((next_idx, "auto", ""))
 
-        # Остальная логика метода без изменений, т.к. она корректна
-        # и соответствует требованиям пользователя
-        # proc_texts = set() # processed_texts
         pln_found = False
-        for m in TEXT_EXTRACTION.finditer(l_cont): # m - match object
-            t_type = m.group(1)  # text_type
+        for m in TEXT_EXTRACTION.finditer(l_cont):
+            t_type = m.group(1)
             text = m.group(2).strip()
             if t_type == 'pln':
                 pln_found = True
             if (t_type == 'pln' or not pln_found) and text:
-                # proc_texts.add(text)
                 self._extract_inline_buttons(text, loc)
 
+        # DEBUG: показываем что парсим
+        print(f"DEBUG: Parsing loc '{loc.name}', content: {repr(l_cont)}")
+        
         for m in BTN_PATTERN.finditer(l_cont):
             target = m.group(1).strip()
-            label = m.group(2)
-            if target: self._add_link_with_cycle_check(loc, target, "btn", label)
-            else: self._add_warning(f"Пустая цель btn из '{loc.name}', кнопка '{label}'")
+            raw_label = m.group(2)
+            # DEBUG: показываем что захватили
+            print(f"DEBUG: BTN match - target: {repr(target)}, raw_label: {repr(raw_label)}")
+            
+            label = raw_label.split('\n')[0].strip() if raw_label else ""
+            print(f"DEBUG: Final label after processing: {repr(label)}")
+            
+            if target: 
+                self._add_link_with_cycle_check(loc, target, "btn", label)
+            else: 
+                self._add_warning(f"Пустая цель btn из '{loc.name}', кнопка '{label}'")
 
         for m in GOTO_CMD_PATTERN.finditer(l_cont):
             target = m.group(1).strip()
@@ -221,7 +229,8 @@ class UrqParser:
             if re.match(r'^\s*if\b', line_text, re.IGNORECASE):
                 parts = re.split(r'\b(then|else)\b', line_text, flags=re.IGNORECASE)
                 # Используем list comprehension для краткости и эффективности
-                lines.extend(p.strip() for p in parts if p.strip() and p.strip().lower() not in ('then', 'else'))
+                # lines.extend(p.strip() for p in parts if p.strip() and p.strip().lower() not in ('then', 'else'))
+                lines.extend(p.lstrip() for p in parts if p.lstrip() and p.lstrip().lower() not in ('then', 'else'))
             else:
                 lines.append(line_text)
         # Разбиваем по & и очищаем
