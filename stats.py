@@ -433,6 +433,34 @@ def _add_link_section(lines: List[str], s: Dict[str, Any]):
        lines.append(f'Максимум переходов: {max_cnt} шт. (из "{max_name}")')
        lines.append("")
    
+   # Детали по типам с прогрессбарами
+   if s['links_total']:
+       lines.append(f"Переходов всего: {s['links_total']} шт.")
+       
+       # Собираем типы для баров
+       types_data = []
+       if s['btn']:
+           details = []
+           if s['btn_local']: details.append(f"{s['btn_local']} локальных")
+           if s['btn_menu']: details.append(f"{s['btn_menu']} меню")
+           extra = f" ({', '.join(details)})" if details else ""
+           types_data.append((s['btn'], f"Кнопки: {s['btn']} шт.{extra}"))
+       
+       for typ, cnt in [('goto', s['goto']), ('proc', s['proc']), ('auto', s['auto'])]:
+           if cnt:
+               types_data.append((cnt, f"{typ.title()}: {cnt} шт."))
+       
+       # Выводим с барами
+       for cnt, text in types_data:
+           line = f"- {text}"
+           padding = 60 - len(line)
+           if padding > 0:
+               line += " " * padding
+           bar = _bar(cnt, s['links_total'])
+           lines.append(f"{line} {bar}")
+       
+       lines.append("")
+
    # Анализ графа (новая секция)
    if 'graph_stats' in s:
        gs = s['graph_stats']
@@ -469,33 +497,7 @@ def _add_link_section(lines: List[str], s: Dict[str, Any]):
            lines.append("Путей до концовок не найдено.")
            lines.append("")
    
-   # Детали по типам с прогрессбарами
-   if s['links_total']:
-       lines.append(f"Переходов всего: {s['links_total']} шт.")
-       
-       # Собираем типы для баров
-       types_data = []
-       if s['btn']:
-           details = []
-           if s['btn_local']: details.append(f"{s['btn_local']} локальных")
-           if s['btn_menu']: details.append(f"{s['btn_menu']} меню")
-           extra = f" ({', '.join(details)})" if details else ""
-           types_data.append((s['btn'], f"Кнопки: {s['btn']} шт.{extra}"))
-       
-       for typ, cnt in [('goto', s['goto']), ('proc', s['proc']), ('auto', s['auto'])]:
-           if cnt:
-               types_data.append((cnt, f"{typ.title()}: {cnt} шт."))
-       
-       # Выводим с барами
-       for cnt, text in types_data:
-           line = f"- {text}"
-           padding = 60 - len(line)
-           if padding > 0:
-               line += " " * padding
-           bar = _bar(cnt, s['links_total'])
-           lines.append(f"{line} {bar}")
-       
-       lines.append("")
+
 def _add_problems_section(lines: List[str], s: Dict[str, Any]):
     """Секция проблем"""
     lines.append(f"\n{title('Потенциальные Проблемы', '=')}")
