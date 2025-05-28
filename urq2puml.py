@@ -85,12 +85,14 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
                     if stats_text:
                         stats_view = self.view.window().new_file()
-                        stats_view.set_name(f"{os.path.basename(current_file)} - Статистика")
+                        stats_view.set_name(f"{os.path.basename(current_file)} - Статистика.md")
                         stats_view.set_scratch(True)
-                        # Убедимся, что текст содержит символы новой строки для Sublime
+
                         stats_text_for_view = stats_text.replace('\r\n', '\n').replace('\r', '\n')
-                        stats_view.run_command('insert', {'characters': stats_text_for_view})
-                        # stats_view.set_read_only(True)
+                        stats_view.run_command('insert_text', {'text': stats_text_for_view})
+
+                        stats_view.set_syntax_file("Packages/Markdown/Markdown.sublime-syntax")
+
                         self.view.window().status_message(f"Статистика для {os.path.basename(current_file)} отображена.")
                     else:
                         self._add_warning("Не удалось сгенерировать текст статистики (пустая строка).")
@@ -193,3 +195,6 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
     # This function should be defined outside the UrqParser class
     # It takes the list of Loc objects (the 'result' from parser.parse_file)
+class InsertTextCommand(sublime_plugin.TextCommand):
+    def run(self, edit, text=""):
+        self.view.insert(edit, 0, text)   

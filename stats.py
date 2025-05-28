@@ -1,364 +1,617 @@
 # stats.py
 from collections import Counter
-import re 
-from typing import List, Dict, Any, Tuple, Set 
+from typing import List, Dict, Any, Tuple
 
 try:
     from .urq_parser import Loc 
 except ImportError:
     from urq_parser import Loc 
 except Exception: 
-    class Loc: pass 
-    
+    class Loc: pass
 
-# --- Вспомогательные функции для сбора данных (без изменений) ---
-def _collect_basic_stats(locs_data: List[Loc]) -> Dict[str, Any]:
-    stats = {
-        "total_locs": len(locs_data),
-        "ending_locs_count": 0,
-        "desc_chars_total": 0,
-        "desc_words_total": 0,
-        "locs_with_description_count": 0,
-        "cyclic_loc_names": set(),
-        "duplicate_loc_names_set": set(),
-        "locs_without_description_names": []
+# Константы
+BRANCH_MIN = 3
+LONG_LABEL = 80
+TOP_N = 5
+BAR_WIDTH = 20
+
+def title(text: str, char: str = "=") -> str:
+    """Создаёт заголовок с подчёркиванием"""
+    return f"{text}\n{char * len(text)}"
+
+def get_stats(locs: List[Loc]) -> str:
+    if not locs:
+        return f"\n{title('Статистика Квеста')}\n\nПусто. Грустно.\n"
+    
+    s = _collect_stats(locs)
+    
+    # Анализируем структуру
+    s['orphans'] = _find_orphans(locs)
+    s['graph_stats'] = _analyze_graph(locs)
+    
+    lines = [title("Общая Статистика Квеста")]
+    lines.append(f"Локации: {s['total']} шт.")
+    if s['endings']: 
+        lines.append(f"Концовки: {s['endings']} шт.")
+    if s['desc_chars']:
+        lines.append(f"Символов в pln/p: {s['desc_chars']}")
+    
+    _add_loc_section(lines, s)
+    _add_link_section(lines, s)  
+    _add_link_labels_section(lines, s)
+    _add_problems_section(lines, s)
+    
+    return "\n".join(lines)
+
+def _collect_stats(locs: List[Loc]) -> Dict[str, Any]:
+    """Один проход - всё собираем"""
+    s = {
+        'total': len(locs), 'endings': 0, 'desc_chars': 0, 'desc_words': 0,
+        'has_desc': 0, 'no_desc': [], 'cycles': set(), 'dups': set(),
+        'links_total': 0, 'btn': 0, 'btn_local': 0, 'btn_menu': 0, 
+        'goto': 0, 'proc': 0, 'auto': 0, 'phantoms': {}, 'empty_btns': {},
+        'targets': Counter(), 'descs': [], 'link_counts': [], 'labels': [],
+        'auto_links': [], 'orphans': []
     }
-    for loc_obj in locs_data:
-        loc_name_display = loc_obj.name if loc_obj.name else f"локация_без_имени_ID_{loc_obj.id}"
-        if loc_obj.end: stats["ending_locs_count"] += 1
+    
+    for loc in locs:
+        name = loc.name or f"ID_{loc.id}"
         
-        desc_text_current = getattr(loc_obj, 'desc', "")
-        if desc_text_current and desc_text_current != "Нет описания":
-            stats["locs_with_description_count"] += 1
-            stats["desc_chars_total"] += len(desc_text_current)
-            stats["desc_words_total"] += len(desc_text_current.split())
+        # Базовая инфа
+        if loc.end: s['endings'] += 1
+        if getattr(loc, 'cycle', False): s['cycles'].add(name)
+        if getattr(loc, 'dup', False) and loc.name: s['dups'].add(loc.name)
+        
+        # Описания
+        desc = getattr(loc, 'desc', "")
+        if desc and desc != "Нет описания":
+            s['has_desc'] += 1
+            s['desc_chars'] += len(desc)
+            words = len(desc.split())
+            s['desc_words'] += words
+            s['descs'].append((len(desc), name, words))
         else:
-            stats["locs_without_description_names"].append(f'"{loc_name_display}"')
+            s['no_desc'].append(name)
         
-        if getattr(loc_obj, 'cycle', False): stats["cyclic_loc_names"].add(f'"{loc_name_display}"')
-        if getattr(loc_obj, 'dup', False) and loc_obj.name: stats["duplicate_loc_names_set"].add(loc_obj.name)
-    return stats
-
-def _collect_link_stats(locs_data: List[Loc]) -> Dict[str, Any]:
-    stats = {
-        "links_total_count": 0, "links_btn_count": 0, "links_btn_local_count": 0,
-        "links_btn_menu_count": 0, "links_goto_count": 0, "links_proc_count": 0,
-        "links_auto_count": 0, "phantoms_by_source_and_type": {},
-        "empty_label_btns_by_source": {}, "branching_locs_data": [], 
-        "target_counts": Counter(), "button_label_details_list": [], 
-        "long_button_label_details": [] 
-    }
-    BRANCHING_THRESHOLD = 3 
-    LONG_LABEL_THRESHOLD = 80
-
-    for loc_obj in locs_data:
-        loc_name_display = loc_obj.name if loc_obj.name else f"локация_без_имени_ID_{loc_obj.id}"
-        current_loc_phantoms_by_type = {}
-        current_loc_empty_label_btn_count = 0
+        # Связи
+        links = getattr(loc, 'links', [])
+        s['link_counts'].append((name, len(links)))
         
-        loc_links = getattr(loc_obj, 'links', [])
-        num_outgoing_links = len(loc_links)
-        if num_outgoing_links > BRANCHING_THRESHOLD:
-            stats["branching_locs_data"].append((loc_name_display, num_outgoing_links))
-
-        for link_dat in loc_links:
-            if not isinstance(link_dat, tuple) or len(link_dat) < 7: 
-                continue 
-
-            t_name = link_dat[1]        
-            l_type = link_dat[2]        
-            link_label = link_dat[3]    
-            is_ph = link_dat[4]         
-            is_menu_link = link_dat[5]  
-            is_local_link = link_dat[6] 
-
-            stats["links_total_count"] += 1
-
-            if l_type == "btn":
-                stats["links_btn_count"] += 1
-                if is_local_link:  stats["links_btn_local_count"] += 1
-                if is_menu_link:   stats["links_btn_menu_count"] += 1
+        empty_cnt = 0
+        loc_phantoms = {}
+        
+        for link in links:
+            if not isinstance(link, tuple) or len(link) < 7: 
+                continue
+            
+            _, target, ltype, label, phantom, menu, local = link
+            s['links_total'] += 1
+            
+            # Типы
+            if ltype == "btn":
+                s['btn'] += 1
+                if local: s['btn_local'] += 1
+                if menu: s['btn_menu'] += 1
                 
-                if not link_label or not link_label.strip():
-                    current_loc_empty_label_btn_count += 1
-                else: 
-                    stripped_label = link_label.strip()
-                    stats["button_label_details_list"].append({
-                        "length": len(stripped_label), "text": stripped_label, "source_loc": loc_name_display
-                    })
-                    if len(stripped_label) > LONG_LABEL_THRESHOLD:
-                        stats["long_button_label_details"].append(f'"{loc_name_display}" - "{stripped_label}"')
-            elif l_type == "goto": stats["links_goto_count"] += 1
-            elif l_type == "proc": stats["links_proc_count"] += 1
-            elif l_type == "auto": stats["links_auto_count"] += 1
+                if not (label and label.strip()):
+                    empty_cnt += 1
+                else:
+                    clean = label.strip()
+                    words = len(clean.split())
+                    s['labels'].append((len(clean), clean, name, words))
+            elif ltype == "goto": s['goto'] += 1
+            elif ltype == "proc": s['proc'] += 1  
+            elif ltype == "auto": 
+                s['auto'] += 1
+                if target:
+                    s['auto_links'].append((name, target))
+            
+            # Фантомы и цели
+            if phantom and target:
+                loc_phantoms.setdefault(ltype, []).append(target)
+            elif target:
+                s['targets'][target] += 1
+        
+        if loc_phantoms: s['phantoms'][name] = loc_phantoms
+        if empty_cnt: s['empty_btns'][name] = empty_cnt
+    
+    return s
 
-            if is_ph and t_name:
-                current_loc_phantoms_by_type.setdefault(l_type, []).append(t_name)
+def _analyze_graph(locs: List[Loc]) -> Dict[str, Any]:
+    """Полный анализ графа переходов с надписями"""
+    if not locs:
+        return {}
+    
+    # Строим граф основных переходов с надписями
+    graph = {}
+    all_locs = set()
+    endings = []
+    
+    for loc in locs:
+        name = loc.name
+        if not name:
+            continue
             
-            if t_name and not is_ph: 
-                stats["target_counts"][t_name] += 1
-        
-        if current_loc_phantoms_by_type:
-            target_dict_main = stats["phantoms_by_source_and_type"].setdefault(loc_name_display, {})
-            for ph_type, ph_targets in current_loc_phantoms_by_type.items():
-                target_dict_main.setdefault(ph_type, []).extend(ph_targets)
-        
-        if current_loc_empty_label_btn_count > 0:
-            stats["empty_label_btns_by_source"][loc_name_display] = current_loc_empty_label_btn_count
+        all_locs.add(name)
+        graph[name] = []
+        if loc.end:
+            endings.append(name)
             
+        for link in getattr(loc, 'links', []):
+            if len(link) >= 7:
+                _, target, ltype, label, phantom, menu, local = link
+                # Берём все типы переходов, кроме фантомных
+                if target and not phantom:
+                    # Определяем надпись для перехода
+                    if ltype == "btn" and label and label.strip():
+                        link_label = label.strip()
+                    elif ltype == "goto":
+                        link_label = "goto"
+                    elif ltype == "auto":
+                        link_label = "авто"
+                    elif ltype == "proc":
+                        link_label = "proc"
+                    else:
+                        link_label = ltype
+                    
+                    graph[name].append((target, link_label))
+    
+    start = locs[0].name if locs[0].name else "start"
+    
+    # Базовая статистика
+    stats = {
+        'total_connections': sum(len(targets) for targets in graph.values()),
+        'avg_connections': 0,
+        'reachable_count': 0,
+        'paths_to_endings': {},
+        'max_depth': 0,
+        'total_paths': 0
+    }
+    
+    if all_locs:
+        stats['avg_connections'] = stats['total_connections'] / len(all_locs)
+    
+    # Достижимость от старта
+    reachable = _bfs_reachable_with_labels(graph, start)
+    stats['reachable_count'] = len(reachable)
+    
+    # Анализ путей до концовок
+    for end in endings:
+        paths = _find_all_paths_with_labels(graph, start, end, max_depth=20)
+        if paths:
+            shortest = min(paths, key=len)
+            longest = max(paths, key=len)
+            stats['paths_to_endings'][end] = {
+                'count': len(paths),
+                'shortest_len': len(shortest),
+                'longest_len': len(longest),
+                'shortest_path': shortest,
+                'longest_path': longest,
+                'avg_length': sum(len(p) for p in paths) / len(paths)
+            }
+            stats['total_paths'] += len(paths)
+            stats['max_depth'] = max(stats['max_depth'], max(len(p) for p in paths))
+    
     return stats
 
-# --- Вспомогательные функции для ФОРМИРОВАНИЯ СПИСКОВ СТРОК статистики (с исправлениями отступов) ---
-
-def _join_blocks(blocks: List[List[str]]) -> List[str]:
-    final_lines = []
-    first_block_added = False
-    for block in blocks:
-        if block: 
-            if first_block_added:
-                final_lines.append("") 
-            final_lines.extend(block)
-            first_block_added = True
-    return final_lines
-
-def _format_location_stats_lines(basic_stats: Dict[str, Any], link_stats: Dict[str, Any], locs_data: List[Loc]) -> List[str]:
-    blocks_for_this_section = []
-
-    avg_desc_lines = []
-    if basic_stats["locs_with_description_count"] > 0:
-        avg_words = basic_stats["desc_words_total"] / basic_stats["locs_with_description_count"]
-        avg_chars = basic_stats["desc_chars_total"] / basic_stats["locs_with_description_count"]
-        avg_desc_lines.append(f"Средняя длина описания (для {basic_stats['locs_with_description_count']} лок.): {avg_words:.1f} слов, {avg_chars:.1f} симв.")
-    if avg_desc_lines: blocks_for_this_section.append(avg_desc_lines)
-    
-    top_desc_lines = []
-    all_description_details = []
-    for loc_obj in locs_data:
-        desc_text_current = getattr(loc_obj, 'desc', "")
-        if desc_text_current and desc_text_current != "Нет описания":
-            loc_name_display = loc_obj.name if loc_obj.name else f"локация_без_имени_ID_{loc_obj.id}"
-            desc_chars_current = len(desc_text_current)
-            desc_words_current = len(desc_text_current.split())
-            detail_str = f'"{loc_name_display}" ({desc_words_current} слов, {desc_chars_current} симв.)'
-            all_description_details.append((desc_chars_current, detail_str))
-
-    TOP_N_DESCRIPTIONS = 5
-    if all_description_details: 
-        sorted_long_descriptions = sorted(all_description_details, key=lambda item: item[0], reverse=True)
-        top_desc_lines.append(f"Локации с самыми большими описаниями (топ {min(TOP_N_DESCRIPTIONS, len(sorted_long_descriptions))}):")
-        for _, detail_str in sorted_long_descriptions[:TOP_N_DESCRIPTIONS]:
-            top_desc_lines.append(f"{detail_str}") # NO INDENT
-    elif basic_stats["locs_with_description_count"] > 0 : 
-        top_desc_lines.append("Локации с самыми большими описаниями: нет (недостаточно данных для топа).")
-    if top_desc_lines: blocks_for_this_section.append(top_desc_lines)
-
-    no_desc_lines = []
-    if basic_stats["locs_without_description_names"]:
-        no_desc_lines.append(f"Локации без описания: {len(basic_stats['locs_without_description_names'])} шт. ({', '.join(sorted(basic_stats['locs_without_description_names']))})")
-    if no_desc_lines: blocks_for_this_section.append(no_desc_lines)
-
-    branching_lines = []
-    BRANCHING_LOCS_TOP_N = 5 
-    BRANCHING_THRESHOLD = 3  
-    if link_stats["branching_locs_data"]:
-        sorted_branching_locs = sorted(link_stats["branching_locs_data"], key=lambda item: item[1], reverse=True)
-        branching_lines.append(f"Локации-\"развилки\" (с >{BRANCHING_THRESHOLD} связями, топ {min(BRANCHING_LOCS_TOP_N, len(sorted_branching_locs))}):")
-        for loc_name_br, link_count_br in sorted_branching_locs[:BRANCHING_LOCS_TOP_N]:
-            branching_lines.append(f"\"{loc_name_br}\": {link_count_br} связей") # NO INDENT
-    if branching_lines: blocks_for_this_section.append(branching_lines)
-    
-    popular_lines = []
-    POPULAR_TARGETS_TOP_N = 5 
-    if link_stats["target_counts"]:
-        most_common_targets = link_stats["target_counts"].most_common(POPULAR_TARGETS_TOP_N)
-        if most_common_targets: 
-            popular_lines.append(f"Самые \"популярные\" локации (на которые ссылаются, топ {min(POPULAR_TARGETS_TOP_N, len(most_common_targets))}):")
-            for target_name_pop, count_pop in most_common_targets:
-                popular_lines.append(f"\"{target_name_pop}\": {count_pop} ссылок") # NO INDENT
-    if popular_lines: blocks_for_this_section.append(popular_lines)
-        
-    return _join_blocks(blocks_for_this_section)
-
-def _format_link_stats_lines(basic_stats: Dict[str, Any], link_stats: Dict[str, Any], locs_data: List[Loc]) -> List[str]:
-    blocks_for_this_section = []
-    
-    avg_max_links_lines = []
-    total_locs = basic_stats["total_locs"]
-    if total_locs > 0 and link_stats["links_total_count"] > 0 : 
-        avg_max_links_lines.append(f"Среднее количество связей на локацию: {link_stats['links_total_count'] / total_locs:.1f} шт.")
-
-    max_links_count = 0
-    loc_with_max_links = ""
-    if total_locs > 0: 
-        for l_obj_max in locs_data:
-            current_links_max = len(getattr(l_obj_max, 'links', []))
-            if current_links_max > max_links_count:
-                max_links_count = current_links_max
-                loc_with_max_links = l_obj_max.name if l_obj_max.name else f"локация_без_имени_ID_{l_obj_max.id}"
-        if max_links_count > 0: 
-            avg_max_links_lines.append(f"Максимальное количество связей из одной локации: {max_links_count} шт. (из \"{loc_with_max_links}\")")
-    if avg_max_links_lines: blocks_for_this_section.append(avg_max_links_lines)
-
-    link_details_lines = []
-    if link_stats["links_total_count"] > 0: link_details_lines.append(f"Связей (всего): {link_stats['links_total_count']} шт.")
-    if link_stats["links_btn_count"] > 0:
-        btn_details_list = []
-        if link_stats["links_btn_local_count"] > 0: btn_details_list.append(f"{link_stats['links_btn_local_count']} локальных")
-        if link_stats["links_btn_menu_count"] > 0: btn_details_list.append(f"{link_stats['links_btn_menu_count']} меню")
-        details_str_btn = f" (из них {', '.join(btn_details_list)})" if btn_details_list else ""
-        link_details_lines.append(f"Кнопки (btn): {link_stats['links_btn_count']} шт.{details_str_btn}") # NO INDENT (already top level for this sub-block)
-
-    if link_stats["links_goto_count"] > 0: link_details_lines.append(f"Переходы (goto): {link_stats['links_goto_count']} шт.") # NO INDENT
-    if link_stats["links_proc_count"] > 0: link_details_lines.append(f"Процедуры (proc): {link_stats['links_proc_count']} шт.") # NO INDENT
-    if link_stats["links_auto_count"] > 0: link_details_lines.append(f"Автопереходы: {link_stats['links_auto_count']} шт.") # NO INDENT
-    if link_details_lines: blocks_for_this_section.append(link_details_lines)
-    
-    return _join_blocks(blocks_for_this_section)
-
-def _format_problematic_stats_lines(basic_stats: Dict[str, Any], link_stats: Dict[str, Any]) -> List[str]:
-    blocks_for_this_section = []
-
-    cyclic_lines = []
-    cyclic_locs_count_val = len(basic_stats["cyclic_loc_names"])
-    if cyclic_locs_count_val > 0:
-        sorted_cyclic_loc_names_str = ", ".join(sorted(list(basic_stats["cyclic_loc_names"])))
-        cyclic_lines.append(f"Самоссылки: {cyclic_locs_count_val} шт. (в локациях: {sorted_cyclic_loc_names_str})")
-    if cyclic_lines: blocks_for_this_section.append(cyclic_lines)
-    
-    duplicate_lines = []
-    duplicate_locs_count = len(basic_stats["duplicate_loc_names_set"])
-    if basic_stats["duplicate_loc_names_set"]:
-        sorted_duplicate_names_str = ", ".join(f'"{name}"' for name in sorted(list(basic_stats["duplicate_loc_names_set"])))
-        duplicate_lines.append(f"Дубликаты: {sorted_duplicate_names_str} ({duplicate_locs_count} шт.)")
-    if duplicate_lines: blocks_for_this_section.append(duplicate_lines)
-
-    phantom_lines = []
-    if link_stats["phantoms_by_source_and_type"]:
-        phantom_lines.append("Фантомные ссылки:")
-        for loc_name_ph, types_dict_ph in sorted(link_stats["phantoms_by_source_and_type"].items()):
-            phantom_lines.append(f"Фантомы в локации \"{loc_name_ph}\":") # NO INDENT
-            for link_type_ph, targets_list_ph in sorted(types_dict_ph.items()):
-                unique_sorted_targets_ph = sorted(list(set(targets_list_ph)))
-                targets_str_ph = ", ".join(f'"{t}"' for t in unique_sorted_targets_ph)
-                phantom_lines.append(f"{link_type_ph}: {targets_str_ph}") # NO INDENT
-    else:
-        phantom_lines.append("Фантомные ссылки:")
-        phantom_lines.append("Фантомных ссылок не найдено.") # NO INDENT
-    if phantom_lines: blocks_for_this_section.append(phantom_lines)
-
-    empty_label_lines = []
-    if link_stats["empty_label_btns_by_source"]:
-        empty_label_lines.append("Кнопки (btn) с пустыми надписями:")
-        for loc_name_empty, count_empty in sorted(link_stats["empty_label_btns_by_source"].items()):
-            empty_label_lines.append(f"В локации \"{loc_name_empty}\": {count_empty} шт.") # NO INDENT
-    if empty_label_lines: blocks_for_this_section.append(empty_label_lines)
-        
-    return _join_blocks(blocks_for_this_section)
-
-def _format_button_label_analysis_lines(link_stats: Dict[str, Any]) -> List[str]:
-    blocks_for_this_section = []
-    button_label_details_list = link_stats.get("button_label_details_list", [])
-    
-    if not button_label_details_list:
+def _find_all_paths_with_labels(graph: Dict[str, List[Tuple[str, str]]], start: str, end: str, max_depth: int = 15) -> List[List[Tuple[str, str]]]:
+    """Находит все пути с надписями без циклов до определённой глубины"""
+    if start not in graph:
         return []
-
-    avg_len_lines = []
-    all_label_lengths = [item["length"] for item in button_label_details_list]
-    if all_label_lengths: 
-        avg_label_len = sum(all_label_lengths) / len(all_label_lengths)
-        avg_len_lines.append(f"Средняя длина: {avg_label_len:.1f} симв.") # NO INDENT
-    if avg_len_lines: blocks_for_this_section.append(avg_len_lines)
     
-    top_labels_lines = []
-    sorted_button_details = sorted(button_label_details_list, key=lambda x: x["length"])
-    if len(sorted_button_details) >= 1:
-        top_labels_lines.append("Самые длинные (топ-3):") # NO INDENT
-        for detail in sorted_button_details[-3:][::-1]:
-            text_preview = detail['text'][:30] + "..." if len(detail['text']) > 30 else detail['text']
-            top_labels_lines.append(f"{detail['length']} симв. (в \"{detail['source_loc']}\": \"{text_preview}\")") # NO INDENT
-
-        top_labels_lines.append("Самые короткие (топ-3):") # NO INDENT
-        for detail in sorted_button_details[:3]:
-            top_labels_lines.append(f"{detail['length']} симв. (в \"{detail['source_loc']}\": \"{detail['text']}\")") # NO INDENT
-    if top_labels_lines: blocks_for_this_section.append(top_labels_lines)
+    paths = []
     
-    very_long_labels_lines = []
-    LONG_LABEL_THRESHOLD = 80 
-    long_button_labels = link_stats.get("long_button_label_details", [])
-    if long_button_labels:
-        very_long_labels_lines.append(f"Кнопки с длиной надписи >{LONG_LABEL_THRESHOLD} символов ({len(long_button_labels)} шт.):") # NO INDENT
-        for label_detail_str in long_button_labels:
-            very_long_labels_lines.append(f"{label_detail_str}") # NO INDENT
-    if very_long_labels_lines: blocks_for_this_section.append(very_long_labels_lines)
+    def dfs(node: str, path: List[Tuple[str, str]], visited: set):
+        if len(path) > max_depth:  # Защита от слишком длинных путей
+            return
+            
+        if node == end:
+            paths.append(path[:])
+            return
         
-    return _join_blocks(blocks_for_this_section)
+        for target, label in graph.get(node, []):
+            if target not in visited:
+                path.append((target, label))
+                visited.add(target)
+                dfs(target, path, visited)
+                path.pop()
+                visited.remove(target)
+    
+    # Начальный путь содержит только стартовую локацию
+    dfs(start, [(start, "")], {start})
+    return paths
 
+def _bfs_reachable_with_labels(graph: Dict[str, List[Tuple[str, str]]], start: str) -> set:
+    """BFS поиск всех достижимых локаций"""
+    if start not in graph:
+        return set()
+    
+    reachable = {start}
+    queue = [start]
+    
+    while queue:
+        current = queue.pop(0)
+        for target, _ in graph.get(current, []):
+            if target not in reachable:
+                reachable.add(target)
+                queue.append(target)
+    
+    return reachable
 
-# --- Основная функция get_stats (без изменений в логике вызова) ---
-def get_stats(locs_data: List[Loc]) -> str:
-    if not locs_data:
-        return "\n--- Статистика Квеста ---\nСписок локаций пуст. Статистика не может быть рассчитана.\n-------------------------\n"
-
-    output_lines = ["--- Общая Статистика Квеста ---"] 
-
-    basic_stats = _collect_basic_stats(locs_data)
-    link_stats = _collect_link_stats(locs_data) 
-
-    if basic_stats["total_locs"] > 0: output_lines.append(f"Локации: {basic_stats['total_locs']} шт.")
-    if basic_stats["ending_locs_count"] > 0: output_lines.append(f"Концовки: {basic_stats['ending_locs_count']} шт.")
-    if basic_stats.get("desc_chars_total", 0) > 0:
-        output_lines.append(f"Символов в pln/p (всего): {basic_stats['desc_chars_total']}") 
-
-    sections_data = [
-        ("\n--- Статистика по Локациям ---", _format_location_stats_lines(basic_stats, link_stats, locs_data)),
-        ("\n--- Статистика по Связям ---", _format_link_stats_lines(basic_stats, link_stats, locs_data)),
-        ("\n--- Потенциальные Проблемы и Особенности ---", _format_problematic_stats_lines(basic_stats, link_stats)),
-        ("\n--- Анализ надписей кнопок (для непустых) ---", _format_button_label_analysis_lines(link_stats)),
-    ]
-
-    for title, content_lines in sections_data:
-        if content_lines: 
-            output_lines.append(title)
-            output_lines.extend(content_lines)
+def _find_orphans(locs: List[Loc]) -> List[str]:
+    """Находит локации-сиротки через BFS от стартовой"""
+    if not locs:
+        return []
+    
+    # Строим граф всех связей (включая фантомные)
+    graph = {}
+    all_names = set()
+    
+    for loc in locs:
+        name = loc.name
+        if not name:
+            continue
+            
+        all_names.add(name)
+        graph[name] = []
         
-    output_lines.append("\n----------------------------------")
-    return "\n".join(output_lines)
+        for link in getattr(loc, 'links', []):
+            if len(link) >= 2:
+                target = link[1]
+                if target:
+                    graph[name].append(target)
+    
+    # Находим достижимые (простой граф без надписей для этой задачи)
+    start_name = locs[0].name
+    if not start_name:
+        return list(all_names)
+    
+    reachable = _bfs_reachable_simple(graph, start_name)
+    return sorted(all_names - reachable)
 
-# Пример использования (для тестирования вне Sublime)
+def _bfs_reachable_simple(graph: Dict[str, List[str]], start: str) -> set:
+    """BFS поиск для простого графа"""
+    if start not in graph:
+        return set()
+    
+    reachable = {start}
+    queue = [start]
+    
+    while queue:
+        current = queue.pop(0)
+        for target in graph.get(current, []):
+            if target not in reachable:
+                reachable.add(target)
+                queue.append(target)
+    
+    return reachable
+
+def _format_path_with_labels(path: List[Tuple[str, str]]) -> str:
+    """Форматирует путь с надписями"""
+    if not path:
+        return ""
+    
+    result = []
+    for i, (loc, label) in enumerate(path):
+        if i == 0:
+            result.append(f'"{loc}"')
+        else:
+            if label:
+                result.append(f'→ ({label}) → "{loc}"')
+            else:
+                result.append(f'→ "{loc}"')
+    
+    return ' '.join(result)
+
+def _bar(val: int, max_val: int, width: int = BAR_WIDTH) -> str:
+    """ASCII прогрессбар"""
+    if max_val == 0:
+        return "█" * width + " 0%"
+    
+    pct = (val / max_val) * 100
+    filled = int((val / max_val) * width)
+    bar = "█" * filled + "─" * (width - filled)
+    return f"{bar} {pct:.1f}%"
+
+def _format_top(items: List[tuple], val_idx: int = 0, max_chars: int = 60) -> List[str]:
+    """Топ-список с барами"""
+    if not items:
+        return []
+    
+    lines = []
+    max_val = items[0][val_idx] if items else 0
+    
+    for item in items:
+        val = item[val_idx]
+        
+        # Форматируем строку
+        if len(item) == 3 and val_idx == 0:  # Описания (chars, name, words)
+            chars, name, words = item
+            line = f'- "{name}" ({words} слов, {chars} симв.)'
+        elif len(item) == 2:  # Связи/цели (name, count)
+            name, cnt = item
+            line = f'- "{name}": {cnt} связей' if 'связ' in str(item) else f'- "{name}": {cnt} ссылок'
+        else:
+            line = f'- {item}'
+        
+        # Отступ + бар
+        padding = max_chars - len(line)
+        if padding > 0:
+            line += " " * padding
+        
+        progress = _bar(val, max_val)
+        lines.append(f"{line} {progress}")
+    
+    return lines
+
+def _format_label_top(items: List[tuple], val_idx: int = 0, show_bars: bool = True) -> List[str]:
+   """Топ надписей с переносом деталей"""
+   if not items:
+       return []
+   
+   lines = []
+   max_val = items[0][val_idx] if items else 0
+   
+   for item in items:
+       length, text, loc, words = item
+       
+       # Первая строка - только надпись
+       preview = text[:50] + "..." if len(text) > 50 else text
+       lines.append(f'- "{preview}"')
+       
+       # Вторая строка - детали с баром
+       detail = f"  ({length} симв., {words} слов, в \"{loc}\")"
+       
+       if show_bars:
+           padding = 70 - len(detail)
+           if padding > 0:
+               detail += " " * padding
+           progress = _bar(length, max_val)
+           lines.append(f"{detail} {progress}")
+       else:
+           lines.append(detail)
+   
+   return lines
+
+def _add_loc_section(lines: List[str], s: Dict[str, Any]):
+    """Секция локаций"""
+    lines.append(f"\n{title('Статистика по Локациям', '=')}")
+    lines.append("")
+    
+    # Среднее описание
+    if s['has_desc']:
+        avg_w = s['desc_words'] / s['has_desc']
+        avg_c = s['desc_chars'] / s['has_desc'] 
+        lines.append(f"Средняя длина описания ({s['has_desc']} лок.): {avg_w:.1f} слов, {avg_c:.1f} симв.")
+        lines.append("")
+    
+    # Топ описаний
+    if s['descs']:
+        top = sorted(s['descs'], reverse=True)[:TOP_N]
+        lines.append(title(f"Самые большие описания (топ {len(top)})", "-"))
+        lines.append("")
+        for line in _format_top(top, val_idx=0):
+            lines.append(line)
+        lines.append("")
+    
+    # Без описаний
+    if s['no_desc']:
+        names = ', '.join(f'"{n}"' for n in sorted(s['no_desc']))
+        lines.append(f"Без описания: {len(s['no_desc'])} шт. ({names})")
+        lines.append("")
+    
+    # Развилки
+    branches = [(n, c) for n, c in s['link_counts'] if c > BRANCH_MIN]
+    if branches:
+        top = sorted(branches, key=lambda x: x[1], reverse=True)[:TOP_N]
+        lines.append(title(f"Развилки (>{BRANCH_MIN} связей, топ {len(top)})", "-"))
+        lines.append("")
+        for line in _format_top(top, val_idx=1):
+            lines.append(line)
+        lines.append("")
+    
+    # Популярные цели  
+    if s['targets']:
+        top = s['targets'].most_common(TOP_N)
+        lines.append(title(f"Популярные локации (топ {len(top)})", "-"))
+        lines.append("")
+        for line in _format_top(top, val_idx=1):
+            lines.append(line)
+        lines.append("")
+
+def _add_link_section(lines: List[str], s: Dict[str, Any]):
+   """Секция связей"""
+   lines.append(f"\n{title('Статистика по переходам', '=')}")
+   lines.append("")
+   
+   # Среднее и максимум
+   if s['total']:
+       avg = s['links_total'] / s['total']
+       lines.append(f"Среднее количество переходов на локацию: {avg:.1f} шт.")
+       
+       max_name, max_cnt = max(s['link_counts'], key=lambda x: x[1])
+       lines.append(f'Максимум переходов: {max_cnt} шт. (из "{max_name}")')
+       lines.append("")
+   
+   # Анализ графа (новая секция)
+   if 'graph_stats' in s:
+       gs = s['graph_stats']
+       lines.append(title("Анализ путей и связности", "-"))
+       lines.append("")
+       lines.append(f"Достижимо от старта: {gs['reachable_count']} из {s['total']} локаций")
+       
+       if gs['total_paths']:
+           lines.append(f"Всего возможных путей до концовок: {gs['total_paths']} шт.")
+           lines.append(f"Максимальная глубина прохождения: {gs['max_depth']} переходов")
+           lines.append("")
+           
+           # Детали по концовкам с путями
+           for end, info in gs['paths_to_endings'].items():
+               count_word = "путь" if info["count"] == 1 else ("пути" if info["count"] < 5 else "путей")
+               lines.append(f'До концовки "{end}": {info["count"]} {count_word}')
+               
+               # Кратчайший путь с надписями
+               short_path = _format_path_with_labels(info['shortest_path'])
+               
+               lines.append(f"Кратчайший ({info['shortest_len']} шагов):")
+               lines.append(f"~~~\n{short_path}\n~~~")
+
+               # Длиннейший только если отличается
+               if info['longest_len'] > info['shortest_len']:
+                   long_path = _format_path_with_labels(info['longest_path'])
+                   lines.append(f"Длиннейший ({info['longest_len']} шагов):")
+                   lines.append(f"~~~\n{long_path}\n~~~")
+               if info['count'] > 1:
+                   avg_len = int(round(info['avg_length']))
+                   lines.append(f"Средняя длина: {avg_len} шагов")
+               lines.append("")
+       else:
+           lines.append("Путей до концовок не найдено.")
+           lines.append("")
+   
+   # Детали по типам с прогрессбарами
+   if s['links_total']:
+       lines.append(f"Переходов всего: {s['links_total']} шт.")
+       
+       # Собираем типы для баров
+       types_data = []
+       if s['btn']:
+           details = []
+           if s['btn_local']: details.append(f"{s['btn_local']} локальных")
+           if s['btn_menu']: details.append(f"{s['btn_menu']} меню")
+           extra = f" ({', '.join(details)})" if details else ""
+           types_data.append((s['btn'], f"Кнопки: {s['btn']} шт.{extra}"))
+       
+       for typ, cnt in [('goto', s['goto']), ('proc', s['proc']), ('auto', s['auto'])]:
+           if cnt:
+               types_data.append((cnt, f"{typ.title()}: {cnt} шт."))
+       
+       # Выводим с барами
+       for cnt, text in types_data:
+           line = f"- {text}"
+           padding = 60 - len(line)
+           if padding > 0:
+               line += " " * padding
+           bar = _bar(cnt, s['links_total'])
+           lines.append(f"{line} {bar}")
+       
+       lines.append("")
+def _add_problems_section(lines: List[str], s: Dict[str, Any]):
+    """Секция проблем"""
+    lines.append(f"\n{title('Потенциальные Проблемы', '=')}")
+    lines.append("")
+    
+    # Циклы
+    if s['cycles']:
+        names = ', '.join(f'"{n}"' for n in sorted(s['cycles']))
+        lines.append(f"Самоссылки: {len(s['cycles'])} шт. ({names})")
+        lines.append("")
+    
+    # Дубли
+    if s['dups']:
+        names = ', '.join(f'"{n}"' for n in sorted(s['dups']))
+        lines.append(f"Дубликаты: {names} ({len(s['dups'])} шт.)")
+        lines.append("")
+    
+    # Автосвязи
+    if s['auto_links']:
+        auto_list = ', '.join(f'"{src}" -> "{dst}"' for src, dst in sorted(s['auto_links']))
+        lines.append(f"Автосвязи: {auto_list}")
+        lines.append("")
+    
+    # Локации-сиротки
+    if s['orphans']:
+        names = ', '.join(f'"{n}"' for n in sorted(s['orphans']))
+        lines.append(f"Локации-сиротки: {len(s['orphans'])} шт. ({names})")
+        lines.append("")
+    
+    # Фантомы
+    if s['phantoms']:
+        lines.append(title("Фантомные ссылки", "-"))
+        lines.append("")
+        for loc, types in sorted(s['phantoms'].items()):
+            lines.append(f'В "{loc}":')
+            for typ, targets in sorted(types.items()):
+                tlist = ', '.join(f'"{t}"' for t in sorted(set(targets)))
+                lines.append(f"- {typ}: {tlist}")
+            lines.append("")
+    else:
+        lines.append("Фантомных ссылок нет.")
+        lines.append("")
+    
+    # Пустые кнопки
+    if s['empty_btns']:
+        lines.append(title("Кнопки с пустыми надписями", "-"))
+        lines.append("")
+        for loc, cnt in sorted(s['empty_btns'].items()):
+            lines.append(f'- В "{loc}": {cnt} шт.')
+        lines.append("")
+
+def _add_link_labels_section(lines: List[str], s: Dict[str, Any]):
+    """Секция надписей"""
+    if not s['labels']: 
+        return
+    
+    lines.append(f"\n{title('Анализ надписей кнопок', '=')}")
+    lines.append("")
+    
+    # Среднее
+    avg = sum(x[0] for x in s['labels']) / len(s['labels'])
+    lines.append(f"Средняя длина: {avg:.1f} симв.")
+    lines.append("")
+    
+    # Топы
+    by_len = sorted(s['labels'])
+    
+    lines.append(title("Самые длинные (топ-3)", "-"))
+    lines.append("")
+    long_top = by_len[-3:][::-1]
+    for line in _format_label_top(long_top, val_idx=0, show_bars=True):
+        lines.append(line)
+    lines.append("")
+    
+    lines.append(title("Самые короткие (топ-3)", "-"))
+    lines.append("")
+    short_top = by_len[:3]
+    if short_top:
+        for line in _format_label_top(short_top, val_idx=0, show_bars=False):
+            lines.append(line)
+    lines.append("")
+    
+    # Очень длинные
+    long_ones = [(l, t, loc, w) for l, t, loc, w in s['labels'] if l > LONG_LABEL]
+    if long_ones:
+        lines.append(title(f"Длиннее {LONG_LABEL} символов ({len(long_ones)} шт.)", "-"))
+        lines.append("")
+        for length, text, loc, words in long_ones:
+            lines.append(f'- "{loc}" - "{text}"')
+        lines.append("")
+
+# Тест
 if __name__ == '__main__':
     class MockLoc:
-        def __init__(self, name, id_str="mock_id", desc="Нет описания", end=False, cycle=False, dup=False, links=None):
+        def __init__(self, name, id="mock", desc="Нет описания", end=False, cycle=False, dup=False, links=None):
             self.name = name
-            self.id = id_str
+            self.id = id  
             self.desc = desc
             self.end = end
             self.cycle = cycle
             self.dup = dup
-            self.links = links if links is not None else []
+            self.links = links or []
 
-    mock_locs = [
-        MockLoc(name="start", desc="Это старт. Тут много текста.", links=[
+    test_locs = [
+        MockLoc("start", desc="Стартовая локация с описанием.", links=[
             (None, "loc_a", "btn", "Кнопка А", False, False, False),
-            (None, "loc_b", "btn", "Кнопка Б очень длинная надпись более 80 символов чтобы проверить порог", False, False, True), 
-            (None, "популярная_цель", "btn", "к популярной", False, False, False)
+            (None, "target", "btn", "К цели", False, False, False)
         ]),
-        MockLoc(name="loc_a", desc="Локация А.", links=[
-            (None, "loc_c", "goto", "", False, False, False), 
-            (None, "phantom_1", "btn", "", True, False, False), 
-            (None, "популярная_цель", "btn", "тоже к популярной", False, False, False)
+        MockLoc("loc_a", desc="Локация А", links=[
+            (None, "phantom", "btn", "", True, False, False),
+            (None, "target", "goto", "", False, False, False)
         ]),
-        MockLoc(name="loc_b", desc="Локация Б.", links=[ (None, "start", "btn", "Назад на старт", False, True, False), ]),
-        MockLoc(name="loc_c", desc="Локация С, тут тоже есть описание.", end=True, links=[]),
-        MockLoc(name="loc_d", desc="Нет описания", cycle=True, links=[(None, "loc_d", "goto", "", False, False, False)]), 
-        MockLoc(name="start", desc="Дубликат старта", dup=True, links=[(None, "loc_a", "btn", "К дубликату А", False, False, False)]),
-        MockLoc(name="развилка", desc="много выходов", links=[
-            (None, "t1", "btn", "1", False, False, False), (None, "t2", "btn", "2", False, False, False),
-            (None, "t3", "btn", "3", False, False, False), (None, "t4", "btn", "4", False, False, False),
-            (None, "t5", "btn", "5", False, False, False),
-        ]),
-         MockLoc(name="популярная_цель", desc="на меня много ссылаются", links=[]),
-         MockLoc(name="loc_e", desc="ссылка на популярную", links=[(None, "популярная_цель", "goto", "", False, False, False)]),
-         MockLoc(name="loc_f", desc="еще ссылка на популярную", links=[(None, "популярная_цель", "proc", "", False, False, False)]),
+        MockLoc("target", desc="Популярная цель", end=True),
+        MockLoc("cycle", cycle=True, links=[(None, "cycle", "btn", "Сам в себя", False, False, False)]),
+        MockLoc("start", desc="Дубликат", dup=True),  # дубль имени
+        MockLoc("orphan", desc="Сиротка без связей")  # недостижимая
     ]
-    stats_output = get_stats(mock_locs)
-    print(stats_output)
+    
+    print(get_stats(test_locs))
