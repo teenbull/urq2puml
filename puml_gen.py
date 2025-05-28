@@ -53,12 +53,14 @@ DOT_COLOR = "#828282" # серый для стартовой точки
 START_LOC = f"[*] {DOT_COLOR} --> 0 \n"
 
 # Форматы связей
-AUTO_FMT = "{} -[dashed]-> {}\n"
+AUTO_FMT = "{} -[dotted]-> {}\n"
 
 BTN_FMT = "{} --> {} : ({})\n" 
-BTN_EMPTY = f"{{}} -[{BLUE_COLOR}]-> {{}}\n"
-BTN_MENU = f"{{}} -[{BTN_MENU_COLOR}]-> {{}} : %({{}}) <$menu_icon> \n"
-BTN_LOCAL = f"{{}} -[{BTN_LOCAL_COLOR}]-> {{}} : !({{}}) <$local_icon> \n"
+
+# PHANTOM_EMPTY_FMT = f"{{}} -[{BLUE_COLOR},dashed]-> PHANTOM_NODE_URQ : ({{}})\n"
+PHANTOM_FMT = f"{{}} -[{PHANTOM_ARROW_COLOR},dashed]-> PHANTOM_NODE_URQ : ({{}})\n"
+BTN_MENU = f"{{}} -[{BTN_MENU_COLOR}]-> {{}} : ({{}}) <$menu_icon> \n"
+BTN_LOCAL = f"{{}} -[{BTN_LOCAL_COLOR}]-> {{}} : ({{}}) <$local_icon> \n"
 
 DOUBLE_FMT = '{}: [Дубликат метки, строка {}]\\n\\n{}\n'
 
@@ -191,16 +193,13 @@ class PlantumlGen:
         if link_type == "auto":            
             return AUTO_FMT.format(source_id, target_id)
         elif link_type == "btn":
-            if label == "":  # Пустая кнопка, без текста на стрелке
-                return BTN_EMPTY.format(source_id, target_id)
-            else:  # Кнопка с текстом
-                clean_label = self._limit_text(label, BTN_LIMIT)
-                if is_menu:
-                    return BTN_MENU.format(source_id, target_id, clean_label)
-                elif is_local:
-                    return BTN_LOCAL.format(source_id, target_id, clean_label)
-                else: # Обычная кнопка с текстом
-                    return BTN_FMT.format(source_id, target_id, clean_label)
+            clean_label = self._limit_text(label, BTN_LIMIT)
+            if is_menu:
+                return BTN_MENU.format(source_id, target_id, clean_label)
+            elif is_local:
+                return BTN_LOCAL.format(source_id, target_id, clean_label)
+            else:
+                return BTN_FMT.format(source_id, target_id, clean_label)
         elif link_type == "goto":
             return GOTO_FMT.format(source_id, target_id)
         elif link_type == "proc":
@@ -210,11 +209,11 @@ class PlantumlGen:
 
     def _format_phantom_link(self, source_id, target_name, link_type, label):
         """Форматирует phantom связь"""
-        if link_type == "btn" and label == "":
-            return f"{source_id} -[{BLUE_COLOR},dotted]-> PHANTOM_NODE_URQ\n"
+        # if link_type == "btn" and label.strip() == "":
+            # return PHANTOM_EMPTY_FMT.format(source_id, label)
         
-        phantom_label = self._limit_text(label if link_type == "btn" and label else target_name, BTN_LIMIT)
-        return f"{source_id} -[{PHANTOM_ARROW_COLOR},dotted]-> PHANTOM_NODE_URQ : ({phantom_label})\n"
+        label = self._limit_text(label if link_type == "btn" and label else target_name, BTN_LIMIT)
+        return PHANTOM_FMT.format(source_id, label)
 
     def generate_local(self, puml_file, file_type):
         """Генерирует файл через локальный PlantUML"""

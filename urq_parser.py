@@ -304,21 +304,18 @@ class UrqParser:
         
         cl_label = "" # clean_label
         if l_type == "btn":
-            # Упрощенная логика для cl_label, сохраняя суть
-            stripped_label = label.strip() # Вычисляем один раз
-            if not label: cl_label = "" # Пустая исходная строка
-            elif not stripped_label and label: cl_label = " " # Строка из пробелов
-            else: cl_label = self._clean_button_text(stripped_label)
+            # Стрипаем только если есть не-пробельные символы
+            stripped = label.strip()
+            cl_label = self._clean_button_text(stripped) if stripped else label
         
         # (target_name, link_type, label, is_menu, is_local)
         # is_phantom вычисляется позже в _resolve_target_ids
         loc.links.append((target, l_type, cl_label, is_menu, is_local))
-
                  
     def _clean_button_text(self, text):
         """Очищает текст кнопки"""
         if not text: return ""
-        return self._process_text_with_buttons(text).replace('"', "''").strip()
+        return self._process_text_with_buttons(text).replace('"', "''")#.strip()
 
     def _add_warning(self, msg): # msg - message
         """Добавляет предупреждение"""
