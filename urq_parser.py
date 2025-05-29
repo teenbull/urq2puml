@@ -21,6 +21,9 @@ PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
 TEXT_EXTRACTION = re.compile(r"^(pln|p)\s(.*)$", re.MULTILINE)
 COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.MULTILINE | re.DOTALL)
 
+VAR_PATTERN = re.compile(r'^\s*([^=\n]+?)\s*=', re.MULTILINE)
+INV_PATTERN = re.compile(r'^\s*inv\+\s*(.+)', re.MULTILINE | re.IGNORECASE)
+
 class Loc: 
     def __init__(self, id, name, desc, line):
         self.id = id
@@ -35,6 +38,9 @@ class Loc:
         self.tech = self._is_tech_loc(name) # техническая локация
         self.orphan = False # локация-сиротка (недостижима от старта или техлокаций)
         self.links = []  # [(target_id, target_name, type, label, is_phantom, is_manu, is_local)]
+        self.vars = {}   # {var_name_lower: (original_name, count)}
+        self.invs = {}   # {inv_name_lower: (original_name, count)}        
+
     
     def _is_tech_loc(self, name):
         """Проверяет является ли локация технической"""
@@ -172,6 +178,26 @@ class UrqParser:
             target = m.group(1).strip()
             if target: self._add_link_with_cycle_check(loc, target, "proc", "")
             else: self._add_warning(f"Пустая цель proc из '{loc.name}'")
+
+        # Парсим переменные
+        for m in VAR_PATTERN.finditer(l_cont):
+            var_name = m.group(1).strip()
+            if var_name:
+                var_lower = var_name.lower()
+                if var_lower in loc.vars:
+                    loc.vars[var_lower] = (loc.vars[var_lower][0], loc.vars[var_lower][1] + 1)
+                else:
+                    loc.vars[var_lower] = (var_name, 1)
+
+        # Парсим инвентарь
+        for m in INV_PATTERN.finditer(l_cont):
+            inv_name = m.group(1).strip()
+            if inv_name:
+                inv_lower = inv_name.lower()
+                if inv_lower in loc.invs:
+                    loc.invs[inv_lower] = (loc.invs[inv_lower][0], loc.invs[inv_lower][1] + 1)
+                else:
+                    loc.invs[inv_lower] = (inv_name, 1)
 
     def _resolve_target_ids(self, locs):
         """Резолвим имена целей в ID и помечаем цели спец. связей"""
