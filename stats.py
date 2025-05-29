@@ -339,9 +339,9 @@ def _add_loc_section(lines: List[str], s: Dict[str, Any]):
         lines.append(f"Технических локаций: {s['tech']} шт. ({names})")
         
     # Локации-сиротки
-    if s['orphan']:
-        names = ', '.join(f'"{n}"' for n in s['orphan_names'])
-        lines.append(f"Локации-сиротки: {s['orphan']} шт. ({names})")
+    # if s['orphan']:
+    #     names = ', '.join(f'"{n}"' for n in s['orphan_names'])
+    #     lines.append(f"Локации-сиротки: {s['orphan']} шт. ({names})")
     
     # Среднее описание  
     if s['has_desc']:
