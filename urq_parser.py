@@ -161,8 +161,8 @@ class UrqParser:
 
     def _resolve_target_ids(self, locs):
         """Резолвим имена целей в ID и помечаем цели спец. связей"""
-        # Маппинг имен не-дубликатов на их ID
-        n_map = {l.name: l.id for l in locs if not l.dup and l.name} # name_to_id
+        # Маппинг имен не-дубликатов на их ID (case insensitive)
+        n_map = {l.name.lower(): l.id for l in locs if not l.dup and l.name} # name_to_id
         
         # Предварительно создаем маппинг имен дубликатов на ID их *первого* вхождения
         # Это избегает многократного сканирования `locs` для каждого такого линка
@@ -170,9 +170,11 @@ class UrqParser:
         # Отслеживаем имена, для которых уже нашли первый дубликат, чтобы не перезаписывать
         found_dup_names = set() 
         for l_obj in locs: # l_obj - loc object
-            if l_obj.dup and l_obj.name and l_obj.name not in found_dup_names:
-                d_map[l_obj.name] = l_obj.id
-                found_dup_names.add(l_obj.name)
+            if l_obj.dup and l_obj.name:
+                name_lower = l_obj.name.lower()
+                if name_lower not in found_dup_names:
+                    d_map[name_lower] = l_obj.id
+                    found_dup_names.add(name_lower)
         
         # Создаем маппинг ID -> loc для быстрого поиска
         id_to_loc = {l.id: l for l in locs}
@@ -199,12 +201,16 @@ class UrqParser:
                 is_local = link_data[4] if len(link_data) > 4 else False
                 t_id, is_ph = None, True # target_id, is_phantom
                 
-                if t_name == l.name:  # Самоссылка
+                # Case insensitive сравнение
+                t_name_lower = t_name.lower()
+                l_name_lower = l.name.lower()
+                
+                if t_name_lower == l_name_lower:  # Самоссылка
                     t_id, is_ph = l.id, False
-                elif t_name in n_map:  # Основная локация (не дубликат)
-                    t_id, is_ph = n_map[t_name], False
-                elif t_name in d_map:  # Ссылка на дубликат (берем ID первого)
-                    t_id, is_ph = d_map[t_name], False
+                elif t_name_lower in n_map:  # Основная локация (не дубликат)
+                    t_id, is_ph = n_map[t_name_lower], False
+                elif t_name_lower in d_map:  # Ссылка на дубликат (берем ID первого)
+                    t_id, is_ph = d_map[t_name_lower], False
                 # Если t_id все еще None, то это фантомная ссылка
                 
                 res_links.append((t_id, t_name, l_type, label, is_ph, is_menu, is_local))
@@ -310,7 +316,9 @@ class UrqParser:
                 is_menu = (prefix == '%')
                 is_local = (prefix == '!')
 
-        if target == loc.name: loc.cycle = True
+        # Case insensitive сравнение для проверки цикла
+        if target.lower() == loc.name.lower(): 
+            loc.cycle = True
         
         cl_label = "" # clean_label
         if l_type == "btn":
