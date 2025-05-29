@@ -33,7 +33,7 @@ def get_stats(locs: List[Loc]) -> str:
         return f"\n{title('Статистика Квеста')}\n\nПусто. Грустно.\n"
     
     s = _collect_stats(locs)
-    s['orphans'] = _find_orphans(locs)
+    s['orphans'] = _get_orphans(locs)  # быстрое получение вместо поиска
     s['graph_stats'] = _analyze_graph(locs)
     
     lines = [title("Общая Статистика Квеста")]
@@ -50,6 +50,10 @@ def get_stats(locs: List[Loc]) -> str:
     
     return "\n".join(lines)
 
+def _get_orphans(locs: List[Loc]) -> List[str]:
+    """Получает список сироток из готовых флагов"""
+    return [loc.name for loc in locs if loc.name and hasattr(loc, 'orphan') and loc.orphan]
+
 def _collect_stats(locs: List[Loc]) -> Dict[str, Any]:
     """Один проход - всё собираем оптимизированно"""
     s = {
@@ -59,7 +63,8 @@ def _collect_stats(locs: List[Loc]) -> Dict[str, Any]:
         'goto': 0, 'proc': 0, 'auto': 0, 'phantoms': {}, 'empty_btns': {},
         'targets': defaultdict(int), 'link_counts': [], 'labels': [],
         'auto_links': [], 'max_desc': (0, ""), 'max_links': (0, ""),
-        'desc_lens': [], 'label_lens': [], 'tech': 0, 'tech_names': []  # добавили счетчик техлокаций и их имена
+        'desc_lens': [], 'label_lens': [], 'tech': 0, 'tech_names': [],
+        'orphan': 0, 'orphan_names': []  # добавили счетчик сироток
     }
     
     for loc in locs:
@@ -75,6 +80,9 @@ def _collect_stats(locs: List[Loc]) -> Dict[str, Any]:
         if hasattr(loc, 'tech') and loc.tech:  # счетчик техлокаций
             s['tech'] += 1
             s['tech_names'].append(name)
+        if hasattr(loc, 'orphan') and loc.orphan:  # счетчик сироток
+            s['orphan'] += 1
+            s['orphan_names'].append(name)
         
         # Описания - оптимизированный подсчет
         desc = getattr(loc, 'desc', "")
@@ -276,59 +284,6 @@ def _bfs_reachable(graph: Dict[str, List[Tuple[str, str]]], start: str) -> set:
     
     return reachable
 
-def _find_orphans(locs: List[Loc]) -> List[str]:
-    """Находит локации-сиротки (исключая технические)"""
-    if not locs:
-        return []
-    
-    # Строим граф всех связей (включая техлокации для прохождения)
-    graph = defaultdict(list)
-    all_names = set()  # только нетехнические локации
-    
-    for loc in locs:
-        name = loc.name
-        if not name:
-            continue
-            
-        # В граф добавляем все локации для корректного прохождения
-        for link_tuple in getattr(loc, 'links', []):
-            if not link_tuple or len(link_tuple) < LINK_TUPLE_SIZE:
-                continue
-            target = link_tuple[1]  # target из кортежа
-            if target:
-                graph[name].append(target)
-        
-        # В список сироток добавляем только нетехнические
-        if not (hasattr(loc, 'tech') and loc.tech):
-            all_names.add(name)
-    
-    # Находим все техлокации
-    tech_names = set()
-    for loc in locs:
-        if loc.name and hasattr(loc, 'tech') and loc.tech:
-            tech_names.add(loc.name)
-    
-    # Стартовые точки: начальная локация + все техлокации
-    start_name = locs[0].name
-    start_points = {start_name} | tech_names if start_name else tech_names
-    
-    if not start_points:
-        return sorted(all_names)
-    
-    # BFS от всех стартовых точек
-    reachable = set(start_points)
-    queue = list(start_points)
-    
-    while queue:
-        current = queue.pop(0)
-        for target in graph.get(current, []):
-            if target not in reachable:
-                reachable.add(target)
-                queue.append(target)
-    
-    # Возвращаем недостижимые нетехнические локации
-    return sorted(all_names - reachable)
-    
 def _format_path_with_labels(path: List[Tuple[str, str]]) -> str:
     """Форматирует путь с надписями"""
     if not path:
@@ -382,6 +337,11 @@ def _add_loc_section(lines: List[str], s: Dict[str, Any]):
     if s['tech']:
         names = ', '.join(f'"{n}"' for n in s['tech_names'])
         lines.append(f"Технических локаций: {s['tech']} шт. ({names})")
+        
+    # Локации-сиротки
+    if s['orphan']:
+        names = ', '.join(f'"{n}"' for n in s['orphan_names'])
+        lines.append(f"Локации-сиротки: {s['orphan']} шт. ({names})")
     
     # Среднее описание  
     if s['has_desc']:

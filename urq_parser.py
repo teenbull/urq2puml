@@ -33,6 +33,7 @@ class Loc:
         self.non_end = False # не может быть концовкой если на нее ссылается proc, local или menu
         # используется для установки флага end, чтобы не пересматривать перед этим все ссылки заново
         self.tech = self._is_tech_loc(name) # техническая локация
+        self.orphan = False # локация-сиротка (недостижима от старта или техлокаций)
         self.links = []  # [(target_id, target_name, type, label, is_phantom, is_manu, is_local)]
     
     def _is_tech_loc(self, name):
@@ -235,7 +236,60 @@ class UrqParser:
                         target_loc.non_end = True
             
             l.links = res_links
+        
+        # Находим сиротки - нетехнические локации недостижимые от старта или техлокаций
+        self._mark_orphans(locs)
+
+    def _mark_orphans(self, locs):
+        """Помечает локации-сиротки"""
+        if not locs:
+            return
+        
+        # Строим граф всех связей (включая техлокации для прохождения)
+        graph = {}
+        tech_names = set()
+        
+        for loc in locs:
+            if not loc.name:
+                continue
                 
+            # Собираем техлокации
+            if loc.tech:
+                tech_names.add(loc.name)
+            
+            graph[loc.name] = []
+            for link in loc.links:
+                target_name = link[1]  # target_name из кортежа
+                is_phantom = link[4]   # is_phantom из кортежа
+                if target_name and not is_phantom:
+                    graph[loc.name].append(target_name)
+        
+        # Стартовые точки: начальная локация + все техлокации
+        start_name = locs[0].name if locs else None
+        start_points = ({start_name} | tech_names) if start_name else tech_names
+        
+        if not start_points:
+            # Если нет стартовых точек, все нетехнические - сиротки
+            for loc in locs:
+                if not loc.tech:
+                    loc.orphan = True
+            return
+        
+        # BFS от всех стартовых точек
+        reachable = set(start_points)
+        queue = list(start_points)
+        
+        while queue:
+            current = queue.pop(0)
+            for target in graph.get(current, []):
+                if target not in reachable:
+                    reachable.add(target)
+                    queue.append(target)
+        
+        # Помечаем недостижимые нетехнические локации как сиротки
+        for loc in locs:
+            if loc.name and not loc.tech and loc.name not in reachable:
+                loc.orphan = True                
     def _prep_content(self, content):
         """Предобработка контента"""
         content = COMMENTS_REMOVAL.sub('', content)        
