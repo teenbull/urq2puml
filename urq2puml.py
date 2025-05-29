@@ -81,26 +81,15 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                                 
                 self.warnings.extend(parser.get_warnings())
 
-                # --- Вывод статистики, если флаг stats установлен ---
+                # --- Статистика в отдельном потоке ---
                 if stats:
-                    stats_text = get_stats(result) 
-
-                    if stats_text:
-                        stats_view = self.view.window().new_file()
-                        stats_view.set_name(f"{os.path.basename(current_file)} - Статистика.md")
-                        stats_view.set_scratch(True)
-
-                        stats_text_for_view = stats_text.replace('\r\n', '\n').replace('\r', '\n')
-                        stats_view.run_command('insert_text', {'text': stats_text_for_view})
-
-                        stats_view.set_syntax_file("Packages/Markdown/Markdown.sublime-syntax")
-
-                        self.view.window().status_message(f"Статистика для {os.path.basename(current_file)} отображена.")
-                    else:
-                        self._add_warning("Не удалось сгенерировать текст статистики (пустая строка).")
+                    stats_thread = threading.Thread(target=self._gen_stats, args=(result, current_file))
+                    stats_thread.daemon = True
+                    stats_thread.start()
                     
-                    # Если ТОЛЬКО статистика, то выходим после ее отображения
+                    # Если ТОЛЬКО статистика, ждем и выходим
                     if not png and not svg:
+                        self._show_progress_stats(stats_thread)
                         self._print_warnings()
                         return 
 
@@ -138,6 +127,46 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         finally:
             self._print_warnings()
 
+    def _gen_stats(self, result, current_file):
+        """Генерит статистику в отдельном потоке"""
+        try:
+            stats_text = get_stats(result)
+            if stats_text:
+                # Обновляем UI в главном потоке
+                sublime.set_timeout(lambda: self._show_stats(stats_text, current_file), 0)
+            else:
+                sublime.set_timeout(lambda: self._add_warning("Не удалось сгенерировать текст статистики (пустая строка)."), 0)
+        except Exception as e:
+            sublime.set_timeout(lambda: self._add_warning(f"Ошибка генерации статистики: {e}"), 0)
+
+    def _show_stats(self, stats_text, current_file):
+        """Показывает статистику в главном потоке"""
+        stats_view = self.view.window().new_file()
+        stats_view.set_name(f"{os.path.basename(current_file)} - Статистика.md")
+        stats_view.set_scratch(True)
+
+        stats_text_for_view = stats_text.replace('\r\n', '\n').replace('\r', '\n')
+        stats_view.run_command('insert_text', {'text': stats_text_for_view})
+
+        stats_view.set_syntax_file("Packages/Markdown/Markdown.sublime-syntax")
+        self.view.window().status_message(f"Статистика для {os.path.basename(current_file)} отображена.")
+
+    def _show_progress_stats(self, thread):
+        """Показывает прогресс генерации статистики"""
+        def update_status():
+            dots = 0
+            while thread.is_alive():
+                dots = (dots + 1) % 4
+                msg = f"Генерация статистики{'.' * dots}{' ' * (3 - dots)}"
+                sublime.set_timeout(lambda m=msg: self.view.window().status_message(m), 0)
+                time.sleep(0.5)
+            
+            # После завершения
+            sublime.set_timeout(lambda: self.view.window().status_message("Статистика готова."), 0)
+        
+        progress_thread = threading.Thread(target=update_status)
+        progress_thread.daemon = True
+        progress_thread.start()
     def _gen_imgs(self, gen, puml_content, puml_file, png, svg, net):
         """Генерит изображения в отдельном потоке"""
         results = []

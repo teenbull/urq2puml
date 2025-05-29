@@ -281,36 +281,43 @@ def _find_orphans(locs: List[Loc]) -> List[str]:
     if not locs:
         return []
     
-    # Строим простой граф связей
+    # Строим граф всех связей (включая техлокации для прохождения)
     graph = defaultdict(list)
-    all_names = set()
+    all_names = set()  # только нетехнические локации
     
     for loc in locs:
         name = loc.name
         if not name:
             continue
             
-        # Исключаем техлокации из проверки на сиротство
-        if hasattr(loc, 'tech') and loc.tech:
-            continue
-            
-        all_names.add(name)
-        
+        # В граф добавляем все локации для корректного прохождения
         for link_tuple in getattr(loc, 'links', []):
             if not link_tuple or len(link_tuple) < LINK_TUPLE_SIZE:
                 continue
             target = link_tuple[1]  # target из кортежа
             if target:
                 graph[name].append(target)
+        
+        # В список сироток добавляем только нетехнические
+        if not (hasattr(loc, 'tech') and loc.tech):
+            all_names.add(name)
     
-    # Находим достижимые от старта
+    # Находим все техлокации
+    tech_names = set()
+    for loc in locs:
+        if loc.name and hasattr(loc, 'tech') and loc.tech:
+            tech_names.add(loc.name)
+    
+    # Стартовые точки: начальная локация + все техлокации
     start_name = locs[0].name
-    if not start_name:
+    start_points = {start_name} | tech_names if start_name else tech_names
+    
+    if not start_points:
         return sorted(all_names)
     
-    # Простой BFS без меток
-    reachable = {start_name}
-    queue = [start_name]
+    # BFS от всех стартовых точек
+    reachable = set(start_points)
+    queue = list(start_points)
     
     while queue:
         current = queue.pop(0)
@@ -319,8 +326,9 @@ def _find_orphans(locs: List[Loc]) -> List[str]:
                 reachable.add(target)
                 queue.append(target)
     
+    # Возвращаем недостижимые нетехнические локации
     return sorted(all_names - reachable)
-
+    
 def _format_path_with_labels(path: List[Tuple[str, str]]) -> str:
     """Форматирует путь с надписями"""
     if not path:
