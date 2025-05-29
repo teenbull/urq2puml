@@ -29,6 +29,10 @@ PHANTOM_ARROW_COLOR = "#CD5C5C"
 BTN_MENU_COLOR = "dotted" # для кнопок-меню
 BTN_LOCAL_COLOR = "#cccccc,bold" # для локальных кнопок
 
+# Цвета для технических локаций
+TECH_COLOR = "#6D859C"  # светло-серый фон
+TECH_FONT_COLOR = "#FFFFFF"  # белый текст
+
 # PlantUML элементы
 PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
   PHANTOM_NODE_URQ: (Ссылка на несуществующую локацию)
@@ -40,6 +44,10 @@ skinparam state {{
     BorderColor {BORDER_COLOR}
     FontColor {FONT_COLOR}
     ArrowFontColor {ARROW_FONT_COLOR}
+}}
+skinparam state<<tech>> {{
+    BackgroundColor {TECH_COLOR}
+    FontColor {TECH_FONT_COLOR}
 }}
 sprite $menu_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8.2 11.2">
   <path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#3D3D3D"/>
@@ -126,12 +134,19 @@ class PlantumlGen:
                 clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
                 
                 state_line_fmt = STATE_FMT # Default format
-                if loc.cycle:
+                stereotype = ""
+                
+                if loc.tech:
+                    stereotype = "<<tech>>"
+                elif loc.cycle:
                     state_line_fmt = STATE_CYCLE_FMT
-                elif loc.end: # 'elif' ensures cycle takes precedence if both somehow true
+                elif loc.end:
                     state_line_fmt = STATE_END_FMT
                 
-                state_line = state_line_fmt.format(clean_name, loc.id)
+                if loc.tech:
+                    state_line = f'{STATE_FMT.format(clean_name, loc.id)} {stereotype}'
+                else:
+                    state_line = state_line_fmt.format(clean_name, loc.id)
                 
                 content_parts.extend([state_line + "\n", STATE_DESC_FMT.format(loc.id, clean_desc)])
 
@@ -169,7 +184,6 @@ class PlantumlGen:
             raise Exception(f"Ошибка записи файла {output_file}: {e}")
         
         return content
-
     def _add_all_links(self, locs):
         """Добавляет все связи"""
         parts = []

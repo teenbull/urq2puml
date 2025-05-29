@@ -32,7 +32,19 @@ class Loc:
         self.end = False
         self.non_end = False # не может быть концовкой если на нее ссылается proc, local или menu
         # используется для установки флага end, чтобы не пересматривать перед этим все ссылки заново
+        self.tech = self._is_tech_loc(name) # техническая локация
         self.links = []  # [(target_id, target_name, type, label, is_phantom, is_manu, is_local)]
+    
+    def _is_tech_loc(self, name):
+        """Проверяет является ли локация технической"""
+        if not name:
+            return False
+        name_lower = name.lower()
+        return (name_lower == 'common' or 
+                name_lower.startswith('common_') or 
+                name_lower.startswith('use_') or 
+                name_lower.startswith('inv_') or
+            self.id == '0')  # первая локация всегда техническая
 
 class UrqParser:
     def __init__(self):
@@ -103,12 +115,13 @@ class UrqParser:
 
         for l_obj in locs:
             # Концовка = (нет исходящих НЕ-локальных связей) И 
-            #             (не является целью спец. связи типа proc, local, или menu)
+            #             (не является целью спец. связи типа proc, local, или menu) И
+            #             (не является технической локацией)
             if (l_obj.id not in s_ids and
                     # not l_obj.dup and # не является дубликатом?
-                    not l_obj.non_end): # проверка на флаг - не концовка (ставится для целей proc, is_local, is_menu)
+                    not l_obj.non_end and # проверка на флаг - не концовка (ставится для целей proc, is_local, is_menu)
+                    not l_obj.tech): # техническая локация не может быть концовкой
                 l_obj.end = True
-
 
         return locs
 
