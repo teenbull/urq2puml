@@ -12,6 +12,8 @@ import sublime_plugin
 import os, sys
 import subprocess
 import importlib
+import threading
+import time
 
 modules_to_reload = [
     'URQ2PUML.urq_parser',
@@ -50,7 +52,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             return
 
         # Автопереключение на сетевой режим если jar потерялся
-        if not net and not self.jar_exists(): #os.path.exists(PUML_JAR_PATH):
+        if not net and not self.jar_exists():
             net = True
             print("URQ to PlantUML: JAR не найден, переключение на сетевой режим")
 
@@ -108,42 +110,25 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 puml_content = gen.generate_puml(result, puml_file)
                 self.warnings.extend(gen.get_warnings())
 
-                # get_stats(result)
-
                 
             if os.path.exists(puml_file):
                 # Не открывать лишний раз puml файл
                 if not png and not svg and not is_puml:
                     self.view.window().open_file(puml_file)
                 
-                status_parts = [f"{'PUML обработка' if is_puml else 'Конвертация URQ в PlantUML'}: {'готов' if is_puml else '.puml файл сгенерирован'}"]
+                status_msg = f"{'PUML обработка' if is_puml else 'Конвертация URQ в PlantUML'}: {'готов' if is_puml else '.puml файл сгенерирован'}"
                 
-                # Генерируем PNG если нужно
-                if png:
-                    png_success = gen.generate_online(puml_content, puml_file, 'png') if net else gen.generate_local(puml_file, 'png')
+                # Генерируем PNG/SVG в фоне если нужно
+                if png or svg:
+                    thread = threading.Thread(target=self._gen_imgs, args=(gen, puml_content, puml_file, png, svg, net))
+                    thread.daemon = True
+                    thread.start()
                     
-                    if png_success:
-                        status_parts.append(f".png файл создан{' онлайн' if net else ''} и открыт")
-                        png_file = os.path.splitext(puml_file)[0] + '.png'
-                        if not self._open_file_in_default_program(png_file):
-                            sublime.error_message("Не удалось открыть PNG файл в программе по умолчанию")
-                    else:
-                        status_parts.append(".png не создан (см. предупреждения)")
-                
-                # Генерируем SVG если нужно
-                if svg:
-                    svg_success = gen.generate_online(puml_content, puml_file, 'svg') if net else gen.generate_local(puml_file, 'svg')
-                    
-                    if svg_success:
-                        status_parts.append(f".svg файл создан{' онлайн' if net else ''}")
-                        
-                        svg_file_path = os.path.splitext(puml_file)[0] + '.svg'
-                        if not self._open_file_in_default_program(svg_file_path):
-                            sublime.error_message("Не удалось открыть SVG файл в программе по умолчанию")
-                    else:
-                        status_parts.append(".svg не создан (см. предупреждения)")
+                    # Показываем прогресс
+                    self._show_progress(thread)
+                else:
+                    self.view.window().status_message(status_msg + ".")
 
-                self.view.window().status_message(". ".join(status_parts) + ".")
                 self.warnings.extend(gen.get_warnings())
             else:
                 self._add_warning("Critical Error: Файл .puml не был создан.")
@@ -152,6 +137,50 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             self._add_warning(f"Critical Error: Произошла ошибка при конвертации: {e}")
         finally:
             self._print_warnings()
+
+    def _gen_imgs(self, gen, puml_content, puml_file, png, svg, net):
+        """Генерит изображения в отдельном потоке"""
+        results = []
+        
+        if png:
+            success = gen.generate_online(puml_content, puml_file, 'png') if net else gen.generate_local(puml_file, 'png')
+            results.append(('png', success))
+            
+        if svg:
+            success = gen.generate_online(puml_content, puml_file, 'svg') if net else gen.generate_local(puml_file, 'svg')
+            results.append(('svg', success))
+            
+        # Обновляем UI в главном потоке
+        sublime.set_timeout(lambda: self._handle_img_results(results, puml_file), 0)
+
+    def _handle_img_results(self, results, puml_file):
+        """Обрабатывает результаты генерации в главном потоке"""
+        status_parts = []
+        
+        for fmt, success in results:
+            if success:
+                status_parts.append(f".{fmt} создан{' онлайн' if hasattr(self, '_net_mode') else ''} и открыт")
+                img_file = f"{os.path.splitext(puml_file)[0]}.{fmt}"
+                if not self._open_file_in_default_program(img_file):
+                    sublime.error_message(f"Не удалось открыть {fmt.upper()} файл в программе по умолчанию")
+            else:
+                status_parts.append(f".{fmt} не создан (см. предупреждения)")
+                
+        self.view.window().status_message("Генерация завершена: " + ", ".join(status_parts) + ".")
+
+    def _show_progress(self, thread):
+        """Показывает анимированный прогресс пока поток работает"""
+        def update_status():
+            dots = 0
+            while thread.is_alive():
+                dots = (dots + 1) % 4
+                msg = f"Генерация изображений{'.' * dots}{' ' * (3 - dots)}"
+                sublime.set_timeout(lambda m=msg: self.view.window().status_message(m), 0)
+                time.sleep(0.5)
+        
+        progress_thread = threading.Thread(target=update_status)
+        progress_thread.daemon = True
+        progress_thread.start()
 
     def jar_exists(self):
         global PUML_JAR_PATH
@@ -193,8 +222,6 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 print(warning)
             print("=" * 61 + "\n")
 
-    # This function should be defined outside the UrqParser class
-    # It takes the list of Loc objects (the 'result' from parser.parse_file)
 class InsertTextCommand(sublime_plugin.TextCommand):
     def run(self, edit, text=""):
-        self.view.insert(edit, 0, text)   
+        self.view.insert(edit, 0, text)

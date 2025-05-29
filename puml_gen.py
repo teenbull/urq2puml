@@ -28,9 +28,9 @@ BLUE_COLOR = "#6fb4d4"
 PHANTOM_ARROW_COLOR = "#CD5C5C"
 BTN_MENU_COLOR = "dotted" # для кнопок-меню
 BTN_LOCAL_COLOR = "#cccccc,bold" # для локальных кнопок
-
+DOT_COLOR = "#828282" # серый для стартовой точки
 # Цвета для технических локаций
-TECH_COLOR = "#6D859C"  # светло-серый фон
+TECH_COLOR = "#7692AD"  # светло-серый фон
 TECH_FONT_COLOR = "#FFFFFF"  # белый текст
 
 # PlantUML элементы
@@ -57,7 +57,6 @@ sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12">
 </svg>
 """
 
-DOT_COLOR = "#828282" # серый для стартовой точки
 START_LOC = f"[*] {DOT_COLOR} --> 0 \n"
 
 # Форматы связей
