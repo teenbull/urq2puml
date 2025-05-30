@@ -96,7 +96,7 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 # Генерируем PlantUML
                 puml_file = os.path.splitext(current_file)[0] + '.puml'
                 gen = PlantumlGen(PUML_JAR_PATH if not net else None)
-                puml_content = gen.generate_puml(result, puml_file)
+                puml_content = gen.save_puml(result, puml_file)
                 self.warnings.extend(gen.get_warnings())
 
                 
