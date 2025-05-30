@@ -38,8 +38,8 @@ class Loc:
         self.tech = self._is_tech_loc(name) # техническая локация
         self.orphan = False # локация-сиротка (недостижима от старта или техлокаций)
         self.links = []  # [(target_id, target_name, type, label, is_phantom, is_manu, is_local)]
-        self.vars = {}   # {var_name_lower: (original_name, count)}
-        self.invs = {}   # {inv_name_lower: (original_name, count)}        
+        self.vars = set()   # переменные
+        self.invs = set()   # предметы инвентаря
 
     
     def _is_tech_loc(self, name):
@@ -183,21 +183,13 @@ class UrqParser:
         for m in VAR_PATTERN.finditer(l_cont):
             var_name = m.group(1).strip()
             if var_name:
-                var_lower = var_name.lower()
-                if var_lower in loc.vars:
-                    loc.vars[var_lower] = (loc.vars[var_lower][0], loc.vars[var_lower][1] + 1)
-                else:
-                    loc.vars[var_lower] = (var_name, 1)
+                loc.vars.add(var_name.lower())
 
         # Парсим инвентарь
         for m in INV_PATTERN.finditer(l_cont):
             inv_name = m.group(1).strip()
             if inv_name:
-                inv_lower = inv_name.lower()
-                if inv_lower in loc.invs:
-                    loc.invs[inv_lower] = (loc.invs[inv_lower][0], loc.invs[inv_lower][1] + 1)
-                else:
-                    loc.invs[inv_lower] = (inv_name, 1)
+                loc.invs.add(inv_name.lower())
 
     def _resolve_target_ids(self, locs):
         """Резолвим имена целей в ID и помечаем цели спец. связей"""
