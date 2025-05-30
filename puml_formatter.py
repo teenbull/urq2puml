@@ -32,9 +32,9 @@ DOT_COLOR = "#5A6B7D" # серый для стартовой точки
 # TECH_FONT_COLOR = "#FFFFFF"  # белый текст
 
 TECH_COLOR = "#B0E8FF"  # светло-серый фон
-TECH_FONT_COLOR = "#FFFFFF"  # белый текст
+# TECH_FONT_COLOR = "#FFFFFF"  # белый текст
 
-GROUP_TITLE_COLOR = "#5A6B7D"  # темнее для заголовка
+GROUP_TITLE_COLOR = "#6F8194"  # темнее для заголовка
 GROUP_FONT_COLOR = "#FFFFFF"
 
 # PlantUML элементы
