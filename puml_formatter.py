@@ -132,12 +132,9 @@ class PumlFormatter:
                     continue
                     
                 name_parts = loc.name.lower().replace(' ', '_').split('_')
-                if len(name_parts) > depth + 1:
-                    prefix = name_parts[depth]
-                    if len(prefix) > 1:
-                        groups.setdefault(prefix, []).append(loc)
-                    else:
-                        ungrouped.append(loc)
+                if len(name_parts) > depth:
+                    prefix = name_parts[depth] if depth < len(name_parts) else name_parts[-1]
+                    groups.setdefault(prefix, []).append(loc)
                 else:
                     ungrouped.append(loc)
             
