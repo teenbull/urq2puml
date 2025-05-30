@@ -8,23 +8,34 @@ BTN_LIMIT = 30
 
 # Цвета
 PHANTOM_COLOR = "#ffcccb"
+ORPHAN_COLOR = "#ffcccb"  # красный фон для сироток
+PHANTOM_ARROW_COLOR = "#CD5C5C"
+
 STATE_BG_COLOR = "#F0F8FF"
 BORDER_COLOR = "#A9A9A9"
 FONT_COLOR = "#303030"
 ARROW_COLOR = "#606060"
 ARROW_FONT_COLOR = "#404040"
+
 CYCLE_COLOR = "#ffffcc"
 DOUBLE_COLOR = "#ffcccb"
 END_COLOR = "#d0f0d0"
-BLUE_COLOR = "#6fb4d4"
-PHANTOM_ARROW_COLOR = "#CD5C5C"
+
+# BLUE_COLOR = "#6fb4d4"
+
+
 BTN_MENU_COLOR = "dotted" # для кнопок-меню
 BTN_LOCAL_COLOR = "#cccccc,bold" # для локальных кнопок
-DOT_COLOR = "#828282" # серый для стартовой точки
+DOT_COLOR = "#5A6B7D" # серый для стартовой точки
 # Цвета для технических локаций
-TECH_COLOR = "#7692AD"  # светло-серый фон
+# TECH_COLOR = "#6fb4d4"  # светло-серый фон
+# TECH_FONT_COLOR = "#FFFFFF"  # белый текст
+
+TECH_COLOR = "#B0E8FF"  # светло-серый фон
 TECH_FONT_COLOR = "#FFFFFF"  # белый текст
-ORPHAN_COLOR = "#ffcccb"  # красный фон для сироток
+
+GROUP_TITLE_COLOR = "#5A6B7D"  # темнее для заголовка
+GROUP_FONT_COLOR = "#FFFFFF"
 
 # PlantUML элементы
 PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
@@ -40,11 +51,14 @@ skinparam state {{
 }}
 skinparam state<<tech>> {{
     BackgroundColor {TECH_COLOR}
-    FontColor {TECH_FONT_COLOR}
 }}
 skinparam state<<orphan>> {{
     BackgroundColor {ORPHAN_COLOR}
     FontColor {FONT_COLOR}
+}}
+skinparam state<<group>> {{
+    BackgroundColor {GROUP_TITLE_COLOR}
+    FontColor {GROUP_FONT_COLOR}
 }}
 sprite $menu_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8.2 11.2">
   <path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#3D3D3D"/>
@@ -54,7 +68,7 @@ sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12">
 </svg>
 """
 
-START_LOC = f"[*] {DOT_COLOR} --> 0 \n"
+START_LOC = f"[*] {DOT_COLOR} --> {{}} \n"  # Template for start location
 
 # Форматы связей
 AUTO_FMT = "{} -[dotted]-> {}\n"
@@ -83,14 +97,14 @@ class PumlFormatter:
 
     def format_puml(self, locs):
         """Формирует содержимое PUML файла"""
-        has_phantom = any(any(len(link) > 4 and link[4] for link in loc.links) for loc in locs)
+        has_phantom = any(link[4] for loc in locs for link in loc.links if len(link) > 4)
         content_parts = []
         
         # Группируем локации
         ungrouped, groups = self._group_by_prefix(locs)
         
         # Рендерим все группы и локации
-        content_parts.extend(self._render_groups(groups, ungrouped))
+        content_parts.extend(self._render_groups(groups, ungrouped, locs=locs))
 
         # Дубликаты
         for loc in locs:
@@ -100,10 +114,6 @@ class PumlFormatter:
                 
                 state_line = f'state "{clean_name}" as {loc.id} {DOUBLE_COLOR}'
                 content_parts.extend([state_line + "\n", DOUBLE_FMT.format(loc.id, loc.line, clean_desc)])
-
-        # Старт
-        if any(loc.id == '0' for loc in locs):
-            content_parts.append(START_LOC)
 
         # Связи
         content_parts.append(self._add_all_links(locs))
@@ -127,10 +137,6 @@ class PumlFormatter:
             groups, ungrouped = {}, []
             
             for loc in locs_list:
-                if not self._is_valid_loc(loc) or (hasattr(loc, 'dup') and loc.dup):
-                    ungrouped.append(loc)
-                    continue
-                    
                 name_parts = loc.name.lower().replace(' ', '_').split('_')
                 if len(name_parts) > depth:
                     prefix = name_parts[depth] if depth < len(name_parts) else name_parts[-1]
@@ -149,8 +155,7 @@ class PumlFormatter:
             
             return ungrouped, final_groups
         
-        valid_locs = [loc for loc in locs if self._is_valid_loc(loc)]
-        return build_tree(valid_locs)
+        return build_tree(locs)
 
     def _render_location(self, loc, indent=""):
         """Рендерит одну локацию"""
@@ -171,18 +176,17 @@ class PumlFormatter:
             
         return [state_line + "\n", f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"]
 
-    def _render_groups(self, groups, ungrouped, indent=""):
+    def _render_groups(self, groups, ungrouped, indent="", locs=None):
         """Рендерит группы рекурсивно"""
         parts = []
         
-        # Валидные локации без дубликатов, сразу отсортированные
-        valid_ungrouped = [loc for loc in ungrouped 
-                          if not (hasattr(loc, 'dup') and loc.dup)]
+        # Валидные локации (включая дубликаты)
+        valid_ungrouped = [loc for loc in ungrouped if self._is_valid_loc(loc)]
+        valid_ungrouped.sort(key=lambda x: int(x.id) if x.id.isdigit() else float('inf'))
         
-        try:
-            valid_ungrouped.sort(key=lambda x: int(x.id))
-        except (ValueError, AttributeError):
-            pass  # Если сортировка не удалась, оставляем как есть
+        # Добавляем [*] если есть локация 0 в этой группе
+        if locs and any(loc.id == '0' for loc in valid_ungrouped):
+            parts.append(f"{indent}{START_LOC.format('0')}")
         
         for loc in valid_ungrouped:
             parts.extend(self._render_location(loc, indent))
@@ -190,8 +194,8 @@ class PumlFormatter:
         # Группы
         for prefix, (sub_ungrouped, sub_groups) in sorted(groups.items()):
             parts.extend([
-                f"{indent}state {prefix.capitalize()} {{\n",
-                *self._render_groups(sub_groups, sub_ungrouped, indent + "    "),
+                f"{indent}state {prefix.capitalize()} <<group>> {{\n",
+                *self._render_groups(sub_groups, sub_ungrouped, indent + "    ", locs),
                 f"{indent}}}\n"
             ])
         
