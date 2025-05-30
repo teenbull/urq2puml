@@ -127,40 +127,124 @@ class PlantumlGen:
         self.warnings = []
 
     def _group_by_prefix(self, locs):
-        """Группирует локации по префиксам (до _ или пробела)"""
-        groups = {}  # prefix -> [locs]
-        ungrouped = []
+        """Группирует локации по префиксам рекурсивно (до _ или пробела)"""
+        def build_tree(locs_list, depth=0):
+            if depth > 3 or len(locs_list) < 2:  # Лимит глубины и минимум локаций
+                return locs_list, {}
+            
+            groups = {}
+            ungrouped = []
+            
+            for loc in locs_list:
+                # Проверяем что это объект локации, не строка
+                if not hasattr(loc, 'id') or not hasattr(loc, 'name'):
+                    print(f"DEBUG: Invalid loc object: {type(loc)} = {loc}")
+                    ungrouped.append(loc)
+                    continue
+                    
+                if hasattr(loc, 'dup') and loc.dup:
+                    ungrouped.append(loc)
+                    continue
+                    
+                name_parts = loc.name.lower().replace(' ', '_').split('_')
+                if len(name_parts) > depth + 1:
+                    prefix = name_parts[depth]
+                    if len(prefix) > 1:  # Минимум 2 символа
+                        if prefix not in groups:
+                            groups[prefix] = []
+                        groups[prefix].append(loc)
+                    else:
+                        ungrouped.append(loc)
+                else:
+                    ungrouped.append(loc)
+            
+            # Рекурсивно группируем подгруппы
+            final_groups = {}
+            for prefix, group_locs in groups.items():
+                if len(group_locs) >= 2:
+                    sub_ungrouped, sub_groups = build_tree(group_locs, depth + 1)
+                    final_groups[prefix] = (sub_ungrouped, sub_groups)
+                else:
+                    ungrouped.extend(group_locs)
+            
+            return ungrouped, final_groups
         
-        for loc in locs:
-            if loc.dup:
-                ungrouped.append(loc)
+        # Фильтруем только валидные объекты локаций
+        valid_locs = [loc for loc in locs if hasattr(loc, 'id') and hasattr(loc, 'name')]
+        if len(valid_locs) != len(locs):
+            print(f"DEBUG: Filtered {len(locs) - len(valid_locs)} invalid locations")
+        return build_tree(valid_locs)
+
+    def _render_location(self, loc, indent=""):
+        """Рендерит одну локацию"""
+        # Проверяем валидность объекта
+        if not hasattr(loc, 'id') or not hasattr(loc, 'name'):
+            print(f"DEBUG: Invalid loc in render: {type(loc)} = {loc}")
+            return []
+            
+        clean_name = self._limit_text(loc.name, LOC_LIMIT)
+        clean_desc = self._limit_text(getattr(loc, 'desc', ''), DESC_LIMIT)
+        
+        state_line_fmt = STATE_FMT
+        stereotype = ""
+        
+        if hasattr(loc, 'tech') and loc.tech:
+            stereotype = "<<tech>>"
+        elif hasattr(loc, 'orphan') and loc.orphan:
+            stereotype = "<<orphan>>"
+        elif hasattr(loc, 'cycle') and loc.cycle:
+            state_line_fmt = STATE_CYCLE_FMT
+        elif hasattr(loc, 'end') and loc.end:
+            state_line_fmt = STATE_END_FMT
+
+        if stereotype:
+            state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)} {stereotype}'
+        else:
+            state_line = f'{indent}{state_line_fmt.format(clean_name, loc.id)}'
+            
+        return [state_line + "\n", f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"]
+
+    def _render_groups(self, groups, ungrouped, indent=""):
+        """Рендерит группы рекурсивно"""
+        parts = []
+        
+        # Обычные локации
+        for loc in ungrouped:
+            if not hasattr(loc, 'id') or not hasattr(loc, 'name'):
+                print(f"DEBUG: Invalid loc in ungrouped: {type(loc)} = {loc}")
                 continue
-                
-            name = loc.name.lower()
-            prefix = None
-            
-            # Ищем префикс до _ или пробела
-            for sep in ['_', ' ']:
-                if sep in name:
-                    prefix = name.split(sep, 1)[0]
-                    break
-            
-            if prefix and len(prefix) > 1:  # Минимум 2 символа для префикса
-                if prefix not in groups:
-                    groups[prefix] = []
-                groups[prefix].append(loc)
-            else:
-                ungrouped.append(loc)
+            try:
+                loc_id = int(loc.id)
+            except (ValueError, AttributeError):
+                print(f"DEBUG: Invalid loc.id: {loc.id}")
+                continue
+            if not (hasattr(loc, 'dup') and loc.dup):
+                parts.extend(self._render_location(loc, indent))
         
-        # Только группы с 2+ элементами считаются группами
-        final_groups = {}
-        for prefix, locs_list in groups.items():
-            if len(locs_list) >= 2:
-                final_groups[prefix] = locs_list
-            else:
-                ungrouped.extend(locs_list)
+        # Сортируем ungrouped отдельно для безопасности
+        valid_ungrouped = [loc for loc in ungrouped 
+                          if hasattr(loc, 'id') and hasattr(loc, 'name') 
+                          and not (hasattr(loc, 'dup') and loc.dup)]
+        try:
+            sorted_ungrouped = sorted(valid_ungrouped, key=lambda x: int(x.id))
+            parts = []
+            for loc in sorted_ungrouped:
+                parts.extend(self._render_location(loc, indent))
+        except Exception as e:
+            print(f"DEBUG: Sort error: {e}")
+            # Fallback без сортировки
+            parts = []
+            for loc in valid_ungrouped:
+                parts.extend(self._render_location(loc, indent))
         
-        return final_groups, ungrouped
+        # Группы
+        for prefix, (sub_ungrouped, sub_groups) in sorted(groups.items()):
+            group_name = prefix.capitalize()
+            parts.append(f"{indent}state {group_name} {{\n")
+            parts.extend(self._render_groups(sub_groups, sub_ungrouped, indent + "    "))
+            parts.append(f"{indent}}}\n")
+        
+        return parts
 
     def generate_puml(self, locs, output_file):
         """Генерирует PUML файл с группировкой по префиксам"""
@@ -168,62 +252,10 @@ class PlantumlGen:
         content_parts = []
         
         # Группируем локации
-        groups, ungrouped = self._group_by_prefix(locs)
+        ungrouped, groups = self._group_by_prefix(locs)
         
-        # Обычные локации (не в группах)
-        for loc in sorted(ungrouped, key=lambda x: int(x.id)):
-            if not loc.dup:
-                clean_name = self._limit_text(loc.name, LOC_LIMIT)
-                clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
-                
-                state_line_fmt = STATE_FMT
-                stereotype = ""
-                
-                if loc.tech:
-                    stereotype = "<<tech>>"
-                elif loc.orphan:
-                    stereotype = "<<orphan>>"
-                elif loc.cycle:
-                    state_line_fmt = STATE_CYCLE_FMT
-                elif loc.end:
-                    state_line_fmt = STATE_END_FMT
-
-                if loc.tech or loc.orphan:
-                    state_line = f'{STATE_FMT.format(clean_name, loc.id)} {stereotype}'
-                else:
-                    state_line = state_line_fmt.format(clean_name, loc.id)
-                    
-                content_parts.extend([state_line + "\n", STATE_DESC_FMT.format(loc.id, clean_desc)])
-        
-        # Группы префиксов
-        for prefix, group_locs in sorted(groups.items()):
-            group_name = prefix.capitalize()
-            content_parts.append(f"state {group_name} {{\n")
-            
-            for loc in sorted(group_locs, key=lambda x: int(x.id)):
-                clean_name = self._limit_text(loc.name, LOC_LIMIT)
-                clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
-                
-                state_line_fmt = STATE_FMT
-                stereotype = ""
-                
-                if loc.tech:
-                    stereotype = "<<tech>>"
-                elif loc.orphan:
-                    stereotype = "<<orphan>>"
-                elif loc.cycle:
-                    state_line_fmt = STATE_CYCLE_FMT
-                elif loc.end:
-                    state_line_fmt = STATE_END_FMT
-
-                if loc.tech or loc.orphan:
-                    state_line = f'    {STATE_FMT.format(clean_name, loc.id)} {stereotype}'
-                else:
-                    state_line = f'    {state_line_fmt.format(clean_name, loc.id)}'
-                    
-                content_parts.extend([state_line + "\n", f"    {STATE_DESC_FMT.format(loc.id, clean_desc)}", "\n"])
-            
-            content_parts.append("}\n")
+        # Рендерим все группы и локации
+        content_parts.extend(self._render_groups(groups, ungrouped))
 
         # Дубликаты
         for loc in locs:
