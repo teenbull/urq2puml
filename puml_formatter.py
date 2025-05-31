@@ -103,17 +103,10 @@ class PumlFormatter:
         # Группируем локации
         ungrouped, groups = self._group_by_prefix(locs)
         
-        # Рендерим все группы и локации
+        # Рендерим все группы и локации (включая дубликаты)
         content_parts.extend(self._render_groups(groups, ungrouped, locs=locs))
 
-        # Дубликаты
-        for loc in locs:
-            if loc.dup:
-                clean_name = self._limit_text(loc.name, LOC_LIMIT)
-                clean_desc = self._limit_text(loc.desc, DESC_LIMIT)
-                
-                state_line = f'state "{clean_name}" as {loc.id} {DOUBLE_COLOR}'
-                content_parts.extend([state_line + "\n", DOUBLE_FMT.format(loc.id, loc.line, clean_desc)])
+        # Убираем отдельный цикл дубликатов - они уже обработаны в _render_location
 
         # Связи
         content_parts.append(self._add_all_links(locs))
@@ -127,7 +120,7 @@ class PumlFormatter:
         final_parts.append("@enduml\n")
         
         return ''.join(final_parts)
-
+        
     def _group_by_prefix(self, locs):
         """Группирует локации по префиксам рекурсивно (до _ или пробела)"""
         def build_tree(locs_list, depth=0):
@@ -163,18 +156,27 @@ class PumlFormatter:
         clean_desc = self._limit_text(getattr(loc, 'desc', ''), DESC_LIMIT)
         
         # Определяем стереотип и формат одним проходом
-        if hasattr(loc, 'tech') and loc.tech:
+        if getattr(loc, 'dup', False):
+            # Для дубликатов - специальный формат с красным фоном
+            state_line = f'{indent}state "{clean_name}" as {loc.id} {DOUBLE_COLOR}'
+            desc_line = f'{indent}{loc.id}: [Дубликат метки, строка {loc.line}]\\n\\n{clean_desc}\n'
+        elif hasattr(loc, 'tech') and loc.tech:
             state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)} <<tech>>'
+            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
         elif hasattr(loc, 'orphan') and loc.orphan:
             state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)} <<orphan>>'
+            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
         elif hasattr(loc, 'cycle') and loc.cycle:
             state_line = f'{indent}{STATE_CYCLE_FMT.format(clean_name, loc.id)}'
+            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
         elif hasattr(loc, 'end') and loc.end:
             state_line = f'{indent}{STATE_END_FMT.format(clean_name, loc.id)}'
+            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
         else:
             state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)}'
+            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
             
-        return [state_line + "\n", f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"]
+        return [state_line + "\n", desc_line]
 
     def _render_groups(self, groups, ungrouped, indent="", locs=None):
         """Рендерит группы рекурсивно"""
