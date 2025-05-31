@@ -23,6 +23,11 @@
         "command": "urq_to_plantuml",
         "args": {"stats": true}
     },         
+    {
+        "caption": "qst: fix",
+        "command": "urq_fix"
+    },    
+
     // {
     //     "caption": "qst: создать граф в png (онлайн)",
     //     "command": "urq_to_plantuml",

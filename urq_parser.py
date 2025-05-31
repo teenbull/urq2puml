@@ -278,8 +278,8 @@ class UrqParser:
             graph[loc.name] = []
             for link in loc.links:
                 target_name = link[1]  # target_name из кортежа
-                is_phantom = link[4]   # is_phantom из кортежа
-                if target_name and not is_phantom:
+                # Убираем проверку на phantom - нам важны все связи для достижимости
+                if target_name:
                     graph[loc.name].append(target_name)
         
         # Стартовые точки: начальная локация + все техлокации
@@ -291,6 +291,7 @@ class UrqParser:
             for loc in locs:
                 if not loc.tech:
                     loc.orphan = True
+                    self._add_warning(f"Сиротка '{loc.name}' на строке {loc.line}")
             return
         
         # BFS от всех стартовых точек
@@ -307,7 +308,8 @@ class UrqParser:
         # Помечаем недостижимые нетехнические локации как сиротки
         for loc in locs:
             if loc.name and not loc.tech and loc.name not in reachable:
-                loc.orphan = True                
+                loc.orphan = True
+                self._add_warning(f"Сиротка '{loc.name}' на строке {loc.line}")
     def _prep_content(self, content):
         """Предобработка контента"""
         content = COMMENTS_REMOVAL.sub('', content)        

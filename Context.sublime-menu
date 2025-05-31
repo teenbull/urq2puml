@@ -49,10 +49,11 @@
                 "caption": "-"
             },            
             {
-                "caption": "Статистика Квеста (СК)",
+                "caption": "СК",
                 "command": "urq_to_plantuml",
                 "args": {"stats": true}
             },            
+
         ]
     }
 ]
