@@ -191,10 +191,11 @@ class PumlFormatter:
         for loc in valid_ungrouped:
             parts.extend(self._render_location(loc, indent))
         
-        # Группы
+        # Группы с уникальными ID
         for prefix, (sub_ungrouped, sub_groups) in sorted(groups.items()):
+            group_id = f"grp_{prefix}_{id((sub_ungrouped, sub_groups))}"  # Уникальный ID
             parts.extend([
-                f"{indent}state {prefix.capitalize()} <<group>> {{\n",
+                f'{indent}state "{prefix.capitalize()}" as {group_id} <<group>> {{\n',
                 *self._render_groups(sub_groups, sub_ungrouped, indent + "    ", locs),
                 f"{indent}}}\n"
             ])
