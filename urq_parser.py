@@ -27,6 +27,15 @@ INV_PATTERN = re.compile(r'^\s*inv\+\s*(.+)', re.M | re.I)
 # Константы
 ENCODING_BUFFER_SIZE = 1024
 
+# Link tuple indices
+LINK_TARGET_ID = 0
+LINK_TARGET_NAME = 1
+LINK_TYPE = 2
+LINK_LABEL = 3
+LINK_IS_PHANTOM = 4
+LINK_IS_MENU = 5
+LINK_IS_LOCAL = 6
+
 class Loc: 
     def __init__(self, id, name, desc, line):
         self.id = id            # номер локации (для puml)
@@ -191,10 +200,10 @@ class UrqParser:
         # Резолвим цели и помечаем концовки
         self._resolve_target_ids(locs)
         
-        # Помечаем концевые локации - теперь проще, смотрим только на target_id
-        end_targets = {link[0] for loc in locs for link in loc.links if link[0] and not link[6]}  # не local
+        # Помечаем концовки - локации у которых нет исходящих ссылок, кроме меню и локальных
         for loc in locs:
-            if loc.id not in end_targets and not loc.non_end and not loc.tech:
+            has_outgoing = any(not link[LINK_IS_MENU] and not link[LINK_IS_LOCAL] for link in loc.links)
+            if not has_outgoing and not loc.non_end and not loc.tech:
                 loc.end = True
 
     def _is_tech_loc(self, name):
@@ -266,65 +275,70 @@ class UrqParser:
                 loc.invs.add(inv_name.lower())
 
     def _resolve_target_ids(self, locs):
-        """Резолвим имена целей в ID и помечаем цели спец. связей"""
-        # Маппинг имен не-дубликатов на их ID (case insensitive)
-        n_map = {l.name.lower(): l.id for l in locs if not l.dup and l.name}
-        
-        # Маппинг имен дубликатов на ID их *первого* вхождения
-        d_map = {}
-        found_dup_names = set() 
-        for l_obj in locs:
-            if l_obj.dup and l_obj.name:
-                name_lower = l_obj.name.lower()
-                if name_lower not in found_dup_names:
-                    d_map[name_lower] = l_obj.id
-                    found_dup_names.add(name_lower)
-        
-        # Создаем маппинг ID -> loc для быстрого поиска
-        id_to_loc = {l.id: l for l in locs}
-        
-        for loc in locs:
-            res_links = []
-            for link in loc.links:
-                t_id, t_name, l_type, label, is_ph, is_menu, is_local = link
-                
-                # Если target_id уже установлен (автолинки), оставляем как есть
-                if t_id is not None:
-                    res_links.append(link)
-                    # Устанавливаем non_end флаг
-                    if l_type == 'proc' or is_local or is_menu:
-                        target_loc = id_to_loc.get(t_id)
-                        if target_loc:
-                            target_loc.non_end = True
-                    continue
-                
-                # Резолвим по имени
-                new_id = None
-                t_name_lower = t_name.lower()
-                
-                if t_name_lower == loc.name.lower():  # Самоссылка
-                    new_id = loc.id
-                    loc.cycle = True
-                elif t_name_lower in n_map:  # Основная локация
-                    new_id = n_map[t_name_lower]
-                elif t_name_lower in d_map:  # Дубликат
-                    new_id = d_map[t_name_lower]
-                
-                # Обновляем is_phantom
-                new_phantom = new_id is None
-                res_links.append((new_id, t_name, l_type, label, new_phantom, is_menu, is_local))
-                
-                # Устанавливаем non_end флаг
-                if new_id and (l_type == 'proc' or is_local or is_menu):
-                    target_loc = id_to_loc.get(new_id)
-                    if target_loc:
-                        target_loc.non_end = True
-            
-            loc.links = res_links
-        
-        # Находим сиротки
-        self._mark_orphans(locs)
-
+       """Резолвим имена целей в ID и помечаем цели спец. связей"""
+       # Маппинг имен не-дубликатов на их ID (case insensitive)
+       n_map = {l.name.lower(): l.id for l in locs if not l.dup and l.name}
+       
+       # Маппинг имен дубликатов на ID их *первого* вхождения
+       d_map = {}
+       found_dup_names = set() 
+       for l_obj in locs:
+           if l_obj.dup and l_obj.name:
+               name_lower = l_obj.name.lower()
+               if name_lower not in found_dup_names:
+                   d_map[name_lower] = l_obj.id
+                   found_dup_names.add(name_lower)
+       
+       # Создаем маппинг ID -> loc для быстрого поиска
+       id_to_loc = {l.id: l for l in locs}
+       
+       for loc in locs:
+           res_links = []
+           for link in loc.links:
+               t_id = link[LINK_TARGET_ID]
+               t_name = link[LINK_TARGET_NAME] 
+               l_type = link[LINK_TYPE]
+               label = link[LINK_LABEL]
+               is_phantom = link[LINK_IS_PHANTOM]
+               is_local = link[LINK_IS_LOCAL]
+               is_menu = link[LINK_IS_MENU]
+               
+               # Если target_id уже установлен (автолинки), оставляем как есть
+               if t_id is not None:
+                   res_links.append(link)
+                   # Устанавливаем non_end флаг
+                   if l_type == 'proc' or is_local or is_menu:
+                       target_loc = id_to_loc.get(t_id)
+                       if target_loc:
+                           target_loc.non_end = True
+                   continue
+               
+               # Резолвим по имени
+               new_id = None
+               t_name_lower = t_name.lower()
+               
+               if t_name_lower == loc.name.lower():  # Самоссылка
+                   new_id = loc.id
+                   loc.cycle = True
+               elif t_name_lower in n_map:  # Основная локация
+                   new_id = n_map[t_name_lower]
+               elif t_name_lower in d_map:  # Дубликат
+                   new_id = d_map[t_name_lower]
+               
+               # Обновляем is_phantom
+               new_phantom = new_id is None
+               res_links.append((new_id, t_name, l_type, label, new_phantom, is_menu, is_local))
+               
+               # Устанавливаем non_end флаг
+               if new_id and (l_type == 'proc' or is_local or is_menu):
+                   target_loc = id_to_loc.get(new_id)
+                   if target_loc:
+                       target_loc.non_end = True
+           
+           loc.links = res_links
+       
+       # Находим сиротки
+       self._mark_orphans(locs)
     def _mark_orphans(self, locs):
         """Помечает локации-сиротки"""
         if not locs:
