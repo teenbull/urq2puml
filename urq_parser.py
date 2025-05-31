@@ -3,24 +3,29 @@
 # URQ Parser - извлекает структуру из URQ файлов
 import re
 import os
+from collections import deque
 
 # Регулярки для парсинга URQ
-LOC_PATTERN = re.compile(r'^\s*:([^\n]+)', re.MULTILINE)
-END_PATTERN = re.compile(r'^\s*\bend\b', re.MULTILINE | re.IGNORECASE)
-GOTO_PATTERN = re.compile(r'^\s*\bgoto\b', re.MULTILINE | re.IGNORECASE)
-PROC_PATTERN = re.compile(r'^\s*\bproc\b', re.MULTILINE | re.IGNORECASE)
-PLN_PATTERN = re.compile(r'^\s*pln\s*(.*)$', re.MULTILINE)
-P_PATTERN = re.compile(r'^\s*p\s*(.*)$', re.MULTILINE)
-BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),([^\r\n]*?)(?=\r?\n|$)', re.MULTILINE | re.IGNORECASE)
-GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.MULTILINE | re.IGNORECASE)
-PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE)
+LOC_PATTERN = re.compile(r'^\s*:([^\n]+)', re.M)
+END_PATTERN = re.compile(r'^\s*\bend\b', re.M | re.I)
+GOTO_PATTERN = re.compile(r'^\s*\bgoto\b', re.M | re.I)
+PROC_PATTERN = re.compile(r'^\s*\bproc\b', re.M | re.I)
+PLN_PATTERN = re.compile(r'^\s*pln\s*(.*)$', re.M)
+P_PATTERN = re.compile(r'^\s*p\s*(.*)$', re.M)
+BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),([^\r\n]*?)(?=\r?\n|$)', re.M | re.I)
+GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.M | re.I)
+PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.M | re.I)
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
 PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
-TEXT_EXTRACTION = re.compile(r"^(pln|p)\s(.*)$", re.MULTILINE)
-COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.MULTILINE | re.DOTALL)
+TEXT_EXTRACTION = re.compile(r"^(pln|p)\s(.*)$", re.M)
+COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.M | re.DOTALL)
+COLON_PATTERN = re.compile(r':([^\n]*)')
 
-VAR_PATTERN = re.compile(r'^\s*([^=\n]+?)\s*=', re.MULTILINE)
-INV_PATTERN = re.compile(r'^\s*inv\+\s*(.+)', re.MULTILINE | re.IGNORECASE)
+VAR_PATTERN = re.compile(r'^\s*([^=\n]+?)\s*=', re.M)
+INV_PATTERN = re.compile(r'^\s*inv\+\s*(.+)', re.M | re.I)
+
+# Константы
+ENCODING_BUFFER_SIZE = 1024
 
 class Loc: 
     def __init__(self, id, name, desc, line):
@@ -64,6 +69,10 @@ class UrqParser:
         
         # Получаем локации с правильными номерами строк
         locs = self._get_locations(orig_content, clean_content)
+        
+        # Освобождаем память от больших строк
+        del orig_content
+        
         if not locs:
             self._add_warning(f"В файле {os.path.basename(file_path)} не найдено ни одной метки")
             return []
@@ -71,13 +80,16 @@ class UrqParser:
         # Анализируем содержимое локаций
         self._analyze_locations(locs, clean_content)
         
+        # Освобождаем память от больших строк
+        del clean_content
+
         # DEBUG: показываем структуру локаций
-        print("=== LOC STRUCTURE DEBUG ===")
-        for loc in locs:
-            print(f"{loc}")
-            for link in loc.links:
-                print(f"  -> {link}")
-        print("=== END DEBUG ===\n")
+        # print("=== LOC STRUCTURE DEBUG ===")
+        # for loc in locs:
+        #     print(f"{loc}")
+        #     for link in loc.links:
+        #         print(f"  -> {link}")
+        # print("=== END DEBUG ===\n")
         
         return locs
 
@@ -88,51 +100,49 @@ class UrqParser:
         if not clean_matches:
             return []
         
-        # Этап 2: Собираем ВСЕ потенциальные :метки из оригинала (для точных номеров строк)
-        orig_pots = []  # raw=имя_после_двоеточия, char=позиция_в_файле, line=номер_строки
-        char_off = 0    # текущее смещение по символам в файле
+        # Этап 2: Собираем потенциальные :метки из оригинала (для точных номеров строк)
+        orig_pots = []  # raw=имя_после_двоеточия, line=номер_строки
+        orig_lines = orig_content.split('\n')
         
-        for line_num, line in enumerate(orig_content.split('\n'), 1):
+        for line_num, line in enumerate(orig_lines, 1):
             # Ищем все :метка в каждой строке (не используем LOC_PATTERN - он для начала строки)
-            for m in re.finditer(r':([^\n]*)', line):
+            for m in COLON_PATTERN.finditer(line):
                 # raw_name = то что после :, убираем блочные /* */ комменты  
                 raw_name = re.sub(r'/\*.*?\*/', '', m.group(1), flags=re.DOTALL).strip()
                 # Добавляем даже если raw_name пустой, но есть что-то после очистки строчных ;
                 if raw_name or self._strip_line_comments(m.group(1).strip()):
                     orig_pots.append({
-                        "raw": raw_name,                    # имя метки (блочные комменты убраны)
-                        "char": char_off + m.start(),       # абсолютная позиция : в файле
-                        "line": line_num                    # реальный номер строки
+                        "raw": raw_name,        # имя метки (блочные комменты убраны)
+                        "line": line_num        # реальный номер строки
                     })
-            char_off += len(line) + 1  # +1 за \n
         
-        # Сортируем по позиции в файле (важно для последовательного сопоставления)
-        orig_pots.sort(key=lambda x: x["char"])
-        
-        # Этап 3: Сопоставляем clean_matches с orig_pots
+        # Этап 3: Сопоставляем clean_matches с orig_pots последовательно
         locs = []
         name_idx = {}       # для поиска дубликатов
-        last_mapped = -1    # оптимизация: не ищем назад в orig_pots
+        orig_idx = 0        # текущий индекс в orig_pots
         
         for i, clean_m in enumerate(clean_matches):
             clean_name = clean_m.group(1).strip()  # имя из очищенного контента
             real_line = -1
             
-            # Ищем соответствующую метку в оригинале (только вперед от last_mapped)
-            for j in range(last_mapped + 1, len(orig_pots)):
-                pot = orig_pots[j]
+            # Ищем соответствующую метку в оригинале (последовательно)
+            while orig_idx < len(orig_pots):
+                pot = orig_pots[orig_idx]
                 # Полностью очищаем имя из оригинала (блочные и строчные комменты)
                 orig_clean = self._strip_line_comments(pot["raw"])
                 
-                if not orig_clean:  # пропускаем пустые после очистки
-                    continue
-                    
-                # Правила сопоставления:
-                # A) Точное совпадение: clean_name == orig_clean
-                # B) Префикс: clean_name начинается с orig_clean (для склеенных &)
-                if clean_name == orig_clean or clean_name.startswith(orig_clean):
-                    real_line = pot["line"]
-                    last_mapped = j
+                if orig_clean:  # пропускаем пустые после очистки
+                    # Правила сопоставления:
+                    # A) Точное совпадение: clean_name == orig_clean
+                    # B) Префикс: clean_name начинается с orig_clean (для склеенных &)
+                    if clean_name == orig_clean or clean_name.startswith(orig_clean):
+                        real_line = pot["line"]
+                        orig_idx += 1  # переходим к следующей потенциальной метке
+                        break
+                
+                orig_idx += 1
+                # Защита от выхода за границы
+                if orig_idx >= len(orig_pots):
                     break
             
             # Фоллбэк: если не нашли в оригинале, считаем по clean_content
@@ -163,66 +173,7 @@ class UrqParser:
     def _strip_line_comments(self, text):
         """Убирает комментарии ; из текста"""
         semi_pos = text.find(';')
-        return text[:semi_pos].strip() if semi_pos != -1 else text.strip()        
-
-    # def _get_locations(self, orig_content, clean_content):
-    #     """Извлекает локации с правильными номерами строк"""
-    #     orig_matches = list(LOC_PATTERN.finditer(orig_content))
-    #     clean_matches = list(LOC_PATTERN.finditer(clean_content))
-        
-    #     locs = []
-    #     name_first_idx = {}  # Для отслеживания дубликатов
-        
-    #     if len(orig_matches) != len(clean_matches):
-    #         self._add_warning("Количество меток в оригинале и очищенном контенте не совпадает")
-        
-    #     for i, clean_m in enumerate(clean_matches):
-    #         name = clean_m.group(1).strip()
-            
-    #         # Вычисляем правильный номер строки
-    #         real_line = self._calc_real_line(orig_content, orig_matches, i, clean_content, clean_m)
-            
-    #         # Извлекаем описание из чистого контента
-    #         s_pos = clean_m.end()
-    #         e_pos = clean_matches[i + 1].start() if i + 1 < len(clean_matches) else len(clean_content)
-    #         l_cont = clean_content[s_pos:e_pos].lstrip()
-            
-    #         desc = self._extract_description(l_cont)
-    #         loc = Loc(str(i), name, desc, real_line)
-    #         loc.tech = self._is_tech_loc(name) or (i == 0)  # первая локация всегда техническая
-            
-    #         # Проверяем дубликаты
-    #         if name in name_first_idx:
-    #             loc.dup = True
-    #             self._add_warning(f"Найден дубликат метки: '{name}' на строке {real_line}")
-    #         else:
-    #             if name: 
-    #                 name_first_idx[name] = i
-            
-    #         locs.append(loc)
-        
-    #     return locs
-
-    # def _calc_real_line(self, orig_content, orig_matches, i, clean_content, clean_m):
-    #     """Вычисляет реальный номер строки для локации"""
-    #     if i < len(orig_matches):
-    #         orig_m = orig_matches[i]
-    #         pos_colon = orig_m.group(0).find(':')
-    #         if pos_colon != -1:
-    #             abs_pos = orig_m.start() + pos_colon
-    #             return orig_content[:abs_pos].count('\n') + 1
-    #         else:
-    #             line_num = orig_content[:orig_m.start()].count('\n') + 1
-    #             if (orig_m.start() > 0 and orig_content[orig_m.start()] == '\n' and
-    #                 orig_content[orig_m.start():].split('\n', 1)[0].strip().startswith(':')):
-    #                 line_num += 1
-    #             return line_num
-    #     else:
-    #         line_num = clean_content[:clean_m.start()].count('\n') + 1
-    #         if (clean_m.start() > 0 and clean_content[clean_m.start()] == '\n' and
-    #             clean_content[clean_m.start():].split('\n', 1)[0].strip().startswith(':')):
-    #             line_num += 1
-    #         return line_num
+        return text[:semi_pos].strip() if semi_pos != -1 else text.strip()
 
     def _analyze_locations(self, locs, clean_content):
         """Анализирует содержимое локаций и извлекает связи"""
@@ -268,12 +219,13 @@ class UrqParser:
                 next_loc = locs[int(next_id)]
                 self._add_link(loc, next_id, next_loc.name, "auto", "", False, False, False)
 
-        pln_found = False
-        for m in TEXT_EXTRACTION.finditer(l_cont):
+        # Оптимизация: делаем поиск по тексту только один раз
+        text_matches = list(TEXT_EXTRACTION.finditer(l_cont))
+        pln_found = any(m.group(1) == 'pln' for m in text_matches)
+        
+        for m in text_matches:
             t_type = m.group(1)
             text = m.group(2).strip()
-            if t_type == 'pln':
-                pln_found = True
             if (t_type == 'pln' or not pln_found) and text:
                 self._extract_inline_buttons(text, loc)
 
@@ -402,12 +354,12 @@ class UrqParser:
                     self._add_warning(f"Сиротка '{loc.name}' на строке {loc.line}")
             return
         
-        # BFS от всех стартовых точек  
+        # BFS от всех стартовых точек с оптимизированной очередью
         reachable = set(start_ids)
-        queue = list(start_ids)
+        queue = deque(start_ids)
         
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             for target_id in graph.get(current, []):
                 if target_id not in reachable:
                     reachable.add(target_id)
@@ -429,8 +381,8 @@ class UrqParser:
         
         lines = []
         for line_text in content.split('\n'):
-            if re.match(r'^\s*if\b', line_text, re.IGNORECASE):
-                parts = re.split(r'\b(then|else)\b', line_text, flags=re.IGNORECASE)
+            if re.match(r'^\s*if\b', line_text, re.I):
+                parts = re.split(r'\b(then|else)\b', line_text, flags=re.I)
                 lines.extend(p.lstrip() for p in parts if p.lstrip() and p.lstrip().lower() not in ('then', 'else'))
             else:
                 lines.append(line_text)
@@ -444,7 +396,7 @@ class UrqParser:
             return None
         try:
             with open(f_path, 'rb') as f:
-                sample = f.read(1024)
+                sample = f.read(ENCODING_BUFFER_SIZE)
             for enc in ['cp1251', 'utf-8']:  # cp1251 сначала
                 try:
                     sample.decode(enc)
@@ -460,7 +412,8 @@ class UrqParser:
     def _read_file(self, f_path):
         """Читает файл"""
         enc = self._detect_encoding(f_path)
-        if not enc: 
+        if not enc:
+            self._add_warning(f"Не удалось прочитать файл {os.path.basename(f_path)} - неизвестная кодировка")
             return None
         try:
             with open(f_path, 'r', encoding=enc) as f:
