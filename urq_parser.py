@@ -11,9 +11,7 @@ GOTO_PATTERN = re.compile(r'^\s*\bgoto\b', re.MULTILINE | re.IGNORECASE)
 PROC_PATTERN = re.compile(r'^\s*\bproc\b', re.MULTILINE | re.IGNORECASE)
 PLN_PATTERN = re.compile(r'^\s*pln\s*(.*)$', re.MULTILINE)
 P_PATTERN = re.compile(r'^\s*p\s*(.*)$', re.MULTILINE)
-# BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),\s*([^\n]+)', re.MULTILINE | re.IGNORECASE)
 BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),([^\r\n]*?)(?=\r?\n|$)', re.MULTILINE | re.IGNORECASE)
-# BTN_PATTERN = re.compile(r'^\s*\bbtn\s+([^,\n]+),([^\n]*?)(?=\n|$)', re.MULTILINE | re.IGNORECASE)
 GOTO_CMD_PATTERN = re.compile(r'^\s*\bgoto\s+(.+)', re.MULTILINE | re.IGNORECASE)
 PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.MULTILINE | re.IGNORECASE)
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
@@ -34,12 +32,23 @@ class Loc:
         self.cycle = False      # на локацию есть самоссылка?
         self.end = False        # локация является концовкой?
         self.non_end = False    # не может быть концовкой если на нее ссылается proc, local или menu
-                                # используется для установки флага end, чтобы не пересматривать перед этим все ссылки заново
         self.tech = False       # техническая локация
         self.orphan = False     # локация-сиротка (недостижима от старта, не может быть технической)
-        self.links = []         # [(target_id, target_name, type, label, is_phantom, is_manu, is_local)]
+        self.links = []         # [(target_id, target_name, type, label, is_phantom, is_menu, is_local)]
         self.vars = set()       # переменные
         self.invs = set()       # предметы инвентаря
+
+    def __repr__(self):
+        return f"Loc(id={self.id}, name='{self.name}', line={self.line}, links={len(self.links)}, flags={self._get_flags()})"    
+
+    def _get_flags(self):
+        flags = []
+        if self.dup: flags.append('dup')
+        if self.cycle: flags.append('cycle')
+        if self.end: flags.append('end')
+        if self.tech: flags.append('tech')
+        if self.orphan: flags.append('orphan')
+        return ','.join(flags) if flags else 'none'
 
 class UrqParser:
     def __init__(self):
@@ -61,66 +70,159 @@ class UrqParser:
         
         # Анализируем содержимое локаций
         self._analyze_locations(locs, clean_content)
+        
+        # DEBUG: показываем структуру локаций
+        print("=== LOC STRUCTURE DEBUG ===")
+        for loc in locs:
+            print(f"{loc}")
+            for link in loc.links:
+                print(f"  -> {link}")
+        print("=== END DEBUG ===\n")
+        
         return locs
 
     def _get_locations(self, orig_content, clean_content):
-        """Извлекает локации с правильными номерами строк"""
-        orig_matches = list(LOC_PATTERN.finditer(orig_content))
+        """Извлекает локации с правильными номерами строк через двухэтапное сопоставление"""
+        # Этап 1: Находим все локации в очищенном контенте (для логики)
         clean_matches = list(LOC_PATTERN.finditer(clean_content))
+        if not clean_matches:
+            return []
         
+        # Этап 2: Собираем ВСЕ потенциальные :метки из оригинала (для точных номеров строк)
+        orig_pots = []  # raw=имя_после_двоеточия, char=позиция_в_файле, line=номер_строки
+        char_off = 0    # текущее смещение по символам в файле
+        
+        for line_num, line in enumerate(orig_content.split('\n'), 1):
+            # Ищем все :метка в каждой строке (не используем LOC_PATTERN - он для начала строки)
+            for m in re.finditer(r':([^\n]*)', line):
+                # raw_name = то что после :, убираем блочные /* */ комменты  
+                raw_name = re.sub(r'/\*.*?\*/', '', m.group(1), flags=re.DOTALL).strip()
+                # Добавляем даже если raw_name пустой, но есть что-то после очистки строчных ;
+                if raw_name or self._strip_line_comments(m.group(1).strip()):
+                    orig_pots.append({
+                        "raw": raw_name,                    # имя метки (блочные комменты убраны)
+                        "char": char_off + m.start(),       # абсолютная позиция : в файле
+                        "line": line_num                    # реальный номер строки
+                    })
+            char_off += len(line) + 1  # +1 за \n
+        
+        # Сортируем по позиции в файле (важно для последовательного сопоставления)
+        orig_pots.sort(key=lambda x: x["char"])
+        
+        # Этап 3: Сопоставляем clean_matches с orig_pots
         locs = []
-        name_first_idx = {}  # Для отслеживания дубликатов
-        
-        if len(orig_matches) != len(clean_matches):
-            self._add_warning("Количество меток в оригинале и очищенном контенте не совпадает")
+        name_idx = {}       # для поиска дубликатов
+        last_mapped = -1    # оптимизация: не ищем назад в orig_pots
         
         for i, clean_m in enumerate(clean_matches):
-            name = clean_m.group(1).strip()
+            clean_name = clean_m.group(1).strip()  # имя из очищенного контента
+            real_line = -1
             
-            # Вычисляем правильный номер строки
-            real_line = self._calc_real_line(orig_content, orig_matches, i, clean_content, clean_m)
+            # Ищем соответствующую метку в оригинале (только вперед от last_mapped)
+            for j in range(last_mapped + 1, len(orig_pots)):
+                pot = orig_pots[j]
+                # Полностью очищаем имя из оригинала (блочные и строчные комменты)
+                orig_clean = self._strip_line_comments(pot["raw"])
+                
+                if not orig_clean:  # пропускаем пустые после очистки
+                    continue
+                    
+                # Правила сопоставления:
+                # A) Точное совпадение: clean_name == orig_clean
+                # B) Префикс: clean_name начинается с orig_clean (для склеенных &)
+                if clean_name == orig_clean or clean_name.startswith(orig_clean):
+                    real_line = pot["line"]
+                    last_mapped = j
+                    break
             
-            # Извлекаем описание из чистого контента
+            # Фоллбэк: если не нашли в оригинале, считаем по clean_content
+            if real_line == -1:
+                real_line = clean_content[:clean_m.start()].count('\n') + 1
+            
+            # Извлекаем описание локации
             s_pos = clean_m.end()
             e_pos = clean_matches[i + 1].start() if i + 1 < len(clean_matches) else len(clean_content)
-            l_cont = clean_content[s_pos:e_pos].lstrip()
+            desc = self._extract_description(clean_content[s_pos:e_pos].lstrip())
             
-            desc = self._extract_description(l_cont)
-            loc = Loc(str(i), name, desc, real_line)
-            loc.tech = self._is_tech_loc(name) or (i == 0)  # первая локация всегда техническая
+            # Создаем объект локации
+            loc = Loc(str(i), clean_name, desc, real_line)
+            loc.tech = self._is_tech_loc(clean_name) or (i == 0)  # первая всегда техническая
             
             # Проверяем дубликаты
-            if name in name_first_idx:
+            if clean_name in name_idx:
                 loc.dup = True
-                self._add_warning(f"Найден дубликат метки: '{name}' на строке {real_line}")
+                self._add_warning(f"Найден дубликат метки: '{clean_name}' на строке {real_line}")
             else:
-                if name: 
-                    name_first_idx[name] = i
+                if clean_name:
+                    name_idx[clean_name] = i
             
             locs.append(loc)
         
         return locs
 
-    def _calc_real_line(self, orig_content, orig_matches, i, clean_content, clean_m):
-        """Вычисляет реальный номер строки для локации"""
-        if i < len(orig_matches):
-            orig_m = orig_matches[i]
-            pos_colon = orig_m.group(0).find(':')
-            if pos_colon != -1:
-                abs_pos = orig_m.start() + pos_colon
-                return orig_content[:abs_pos].count('\n') + 1
-            else:
-                line_num = orig_content[:orig_m.start()].count('\n') + 1
-                if (orig_m.start() > 0 and orig_content[orig_m.start()] == '\n' and
-                    orig_content[orig_m.start():].split('\n', 1)[0].strip().startswith(':')):
-                    line_num += 1
-                return line_num
-        else:
-            line_num = clean_content[:clean_m.start()].count('\n') + 1
-            if (clean_m.start() > 0 and clean_content[clean_m.start()] == '\n' and
-                clean_content[clean_m.start():].split('\n', 1)[0].strip().startswith(':')):
-                line_num += 1
-            return line_num
+    def _strip_line_comments(self, text):
+        """Убирает комментарии ; из текста"""
+        semi_pos = text.find(';')
+        return text[:semi_pos].strip() if semi_pos != -1 else text.strip()        
+
+    # def _get_locations(self, orig_content, clean_content):
+    #     """Извлекает локации с правильными номерами строк"""
+    #     orig_matches = list(LOC_PATTERN.finditer(orig_content))
+    #     clean_matches = list(LOC_PATTERN.finditer(clean_content))
+        
+    #     locs = []
+    #     name_first_idx = {}  # Для отслеживания дубликатов
+        
+    #     if len(orig_matches) != len(clean_matches):
+    #         self._add_warning("Количество меток в оригинале и очищенном контенте не совпадает")
+        
+    #     for i, clean_m in enumerate(clean_matches):
+    #         name = clean_m.group(1).strip()
+            
+    #         # Вычисляем правильный номер строки
+    #         real_line = self._calc_real_line(orig_content, orig_matches, i, clean_content, clean_m)
+            
+    #         # Извлекаем описание из чистого контента
+    #         s_pos = clean_m.end()
+    #         e_pos = clean_matches[i + 1].start() if i + 1 < len(clean_matches) else len(clean_content)
+    #         l_cont = clean_content[s_pos:e_pos].lstrip()
+            
+    #         desc = self._extract_description(l_cont)
+    #         loc = Loc(str(i), name, desc, real_line)
+    #         loc.tech = self._is_tech_loc(name) or (i == 0)  # первая локация всегда техническая
+            
+    #         # Проверяем дубликаты
+    #         if name in name_first_idx:
+    #             loc.dup = True
+    #             self._add_warning(f"Найден дубликат метки: '{name}' на строке {real_line}")
+    #         else:
+    #             if name: 
+    #                 name_first_idx[name] = i
+            
+    #         locs.append(loc)
+        
+    #     return locs
+
+    # def _calc_real_line(self, orig_content, orig_matches, i, clean_content, clean_m):
+    #     """Вычисляет реальный номер строки для локации"""
+    #     if i < len(orig_matches):
+    #         orig_m = orig_matches[i]
+    #         pos_colon = orig_m.group(0).find(':')
+    #         if pos_colon != -1:
+    #             abs_pos = orig_m.start() + pos_colon
+    #             return orig_content[:abs_pos].count('\n') + 1
+    #         else:
+    #             line_num = orig_content[:orig_m.start()].count('\n') + 1
+    #             if (orig_m.start() > 0 and orig_content[orig_m.start()] == '\n' and
+    #                 orig_content[orig_m.start():].split('\n', 1)[0].strip().startswith(':')):
+    #                 line_num += 1
+    #             return line_num
+    #     else:
+    #         line_num = clean_content[:clean_m.start()].count('\n') + 1
+    #         if (clean_m.start() > 0 and clean_content[clean_m.start()] == '\n' and
+    #             clean_content[clean_m.start():].split('\n', 1)[0].strip().startswith(':')):
+    #             line_num += 1
+    #         return line_num
 
     def _analyze_locations(self, locs, clean_content):
         """Анализирует содержимое локаций и извлекает связи"""
@@ -133,16 +235,16 @@ class UrqParser:
                 e_pos = clean_matches[i + 1].start() if i + 1 < len(clean_matches) else len(clean_content)
                 l_cont = clean_content[s_pos:e_pos].lstrip()
                 
-                self._extract_links_and_flags(loc, l_cont, clean_matches, i)
+                self._extract_links_and_flags(loc, l_cont, locs)
         
         # Резолвим цели и помечаем концовки
         self._resolve_target_ids(locs)
         
-        # Помечаем концевые локации
-        s_ids = {l.id for l in locs if any(not link[6] for link in l.links)}
-        for l in locs:
-            if (l.id not in s_ids and not l.non_end and not l.tech):
-                l.end = True
+        # Помечаем концевые локации - теперь проще, смотрим только на target_id
+        end_targets = {link[0] for loc in locs for link in loc.links if link[0] and not link[6]}  # не local
+        for loc in locs:
+            if loc.id not in end_targets and not loc.non_end and not loc.tech:
+                loc.end = True
 
     def _is_tech_loc(self, name):
         """Проверяет является ли локация технической"""
@@ -154,16 +256,17 @@ class UrqParser:
                 name_lower.startswith('use_') or 
                 name_lower.startswith('inv_'))
 
-    def _extract_links_and_flags(self, loc, l_cont, all_matches, loc_idx):
-        """Извлекает связи и устанавливает флаги (адаптировано для all_matches)"""
-        # l_cont - loc_content, all_matches - полный список regex matches для проверки границ
+    def _extract_links_and_flags(self, loc, l_cont, locs):
+        """Извлекает связи и устанавливает флаги"""
         has_end = END_PATTERN.search(l_cont)
         has_goto = GOTO_PATTERN.search(l_cont)
         
+        # Автолинк - просто на следующую локацию по ID
         if not has_end and not has_goto:
-            next_idx = loc_idx + 1
-            if next_idx < len(all_matches):
-                loc.links.append((next_idx, "auto", ""))
+            next_id = str(int(loc.id) + 1)
+            if int(next_id) < len(locs):
+                next_loc = locs[int(next_id)]
+                self._add_link(loc, next_id, next_loc.name, "auto", "", False, False, False)
 
         pln_found = False
         for m in TEXT_EXTRACTION.finditer(l_cont):
@@ -174,32 +277,29 @@ class UrqParser:
             if (t_type == 'pln' or not pln_found) and text:
                 self._extract_inline_buttons(text, loc)
 
-        # DEBUG: показываем что парсим
-        # print(f"DEBUG: Parsing loc '{loc.name}', content: {repr(l_cont)}")
-        
         for m in BTN_PATTERN.finditer(l_cont):
             target = m.group(1).strip()
             raw_label = m.group(2)
-            # DEBUG: показываем что захватили
-            # print(f"DEBUG: BTN match - target: {repr(target)}, raw_label: {repr(raw_label)}")
-            
             label = raw_label.split('\n')[0].strip() if raw_label else ""
-            # print(f"DEBUG: Final label after processing: {repr(label)}")
             
             if target: 
-                self._add_link_with_cycle_check(loc, target, "btn", label)
+                self._add_link_with_prefixes(loc, target, "btn", label)
             else: 
                 self._add_warning(f"Пустая цель btn из '{loc.name}', кнопка '{label}'")
 
         for m in GOTO_CMD_PATTERN.finditer(l_cont):
             target = m.group(1).strip()
-            if target: self._add_link_with_cycle_check(loc, target, "goto", "")
-            else: self._add_warning(f"Пустая цель goto из '{loc.name}'")
+            if target: 
+                self._add_link_with_prefixes(loc, target, "goto", "")
+            else: 
+                self._add_warning(f"Пустая цель goto из '{loc.name}'")
 
         for m in PROC_CMD_PATTERN.finditer(l_cont):
             target = m.group(1).strip()
-            if target: self._add_link_with_cycle_check(loc, target, "proc", "")
-            else: self._add_warning(f"Пустая цель proc из '{loc.name}'")
+            if target: 
+                self._add_link_with_prefixes(loc, target, "proc", "")
+            else: 
+                self._add_warning(f"Пустая цель proc из '{loc.name}'")
 
         # Парсим переменные
         for m in VAR_PATTERN.finditer(l_cont):
@@ -216,14 +316,12 @@ class UrqParser:
     def _resolve_target_ids(self, locs):
         """Резолвим имена целей в ID и помечаем цели спец. связей"""
         # Маппинг имен не-дубликатов на их ID (case insensitive)
-        n_map = {l.name.lower(): l.id for l in locs if not l.dup and l.name} # name_to_id
+        n_map = {l.name.lower(): l.id for l in locs if not l.dup and l.name}
         
-        # Предварительно создаем маппинг имен дубликатов на ID их *первого* вхождения
-        # Это избегает многократного сканирования `locs` для каждого такого линка
-        d_map = {} # name_to_first_dup_id
-        # Отслеживаем имена, для которых уже нашли первый дубликат, чтобы не перезаписывать
+        # Маппинг имен дубликатов на ID их *первого* вхождения
+        d_map = {}
         found_dup_names = set() 
-        for l_obj in locs: # l_obj - loc object
+        for l_obj in locs:
             if l_obj.dup and l_obj.name:
                 name_lower = l_obj.name.lower()
                 if name_lower not in found_dup_names:
@@ -233,51 +331,46 @@ class UrqParser:
         # Создаем маппинг ID -> loc для быстрого поиска
         id_to_loc = {l.id: l for l in locs}
         
-        for l in locs: # l - loc object
-            res_links = [] # resolved_links
-            for link_data in l.links: # link_data - (target, type, label, is_menu, is_local) or (idx, type, label, is_menu, is_local)
-                if isinstance(link_data[0], int):  # Автосвязь по индексу
-                    idx, l_type, label = link_data[:3] # auto_idx, link_type
-                    is_menu = link_data[3] if len(link_data) > 3 else False
-                    is_local = link_data[4] if len(link_data) > 4 else False
-                    if idx < len(locs):
-                        t_loc = locs[idx] # target_loc
-                        res_links.append((t_loc.id, t_loc.name, l_type, label, False, is_menu, is_local))
-                        
-                        # Устанавливаем non_end флаг для целевой локации
-                        if l_type == 'proc' or is_local or is_menu:
-                            t_loc.non_end = True
-                    # else: можно добавить warning для некорректного индекса автосвязи
+        for loc in locs:
+            res_links = []
+            for link in loc.links:
+                t_id, t_name, l_type, label, is_ph, is_menu, is_local = link
+                
+                # Если target_id уже установлен (автолинки), оставляем как есть
+                if t_id is not None:
+                    res_links.append(link)
+                    # Устанавливаем non_end флаг
+                    if l_type == 'proc' or is_local or is_menu:
+                        target_loc = id_to_loc.get(t_id)
+                        if target_loc:
+                            target_loc.non_end = True
                     continue
                 
-                t_name, l_type, label = link_data[:3] # target_name, link_type
-                is_menu = link_data[3] if len(link_data) > 3 else False
-                is_local = link_data[4] if len(link_data) > 4 else False
-                t_id, is_ph = None, True # target_id, is_phantom
-                
-                # Case insensitive сравнение
+                # Резолвим по имени
+                new_id = None
                 t_name_lower = t_name.lower()
-                l_name_lower = l.name.lower()
                 
-                if t_name_lower == l_name_lower:  # Самоссылка
-                    t_id, is_ph = l.id, False
-                elif t_name_lower in n_map:  # Основная локация (не дубликат)
-                    t_id, is_ph = n_map[t_name_lower], False
-                elif t_name_lower in d_map:  # Ссылка на дубликат (берем ID первого)
-                    t_id, is_ph = d_map[t_name_lower], False
-                # Если t_id все еще None, то это фантомная ссылка
+                if t_name_lower == loc.name.lower():  # Самоссылка
+                    new_id = loc.id
+                    loc.cycle = True
+                elif t_name_lower in n_map:  # Основная локация
+                    new_id = n_map[t_name_lower]
+                elif t_name_lower in d_map:  # Дубликат
+                    new_id = d_map[t_name_lower]
                 
-                res_links.append((t_id, t_name, l_type, label, is_ph, is_menu, is_local))
+                # Обновляем is_phantom
+                new_phantom = new_id is None
+                res_links.append((new_id, t_name, l_type, label, new_phantom, is_menu, is_local))
                 
-                # Устанавливаем non_end флаг для целевой локации (если она существует)
-                if t_id is not None and (l_type == 'proc' or is_local or is_menu):
-                    target_loc = id_to_loc.get(t_id)
+                # Устанавливаем non_end флаг
+                if new_id and (l_type == 'proc' or is_local or is_menu):
+                    target_loc = id_to_loc.get(new_id)
                     if target_loc:
                         target_loc.non_end = True
             
-            l.links = res_links
+            loc.links = res_links
         
-        # Находим сиротки - нетехнические локации недостижимые от старта или техлокаций
+        # Находим сиротки
         self._mark_orphans(locs)
 
     def _mark_orphans(self, locs):
@@ -285,51 +378,44 @@ class UrqParser:
         if not locs:
             return
         
-        # Строим граф всех связей (включая техлокации для прохождения)
-        graph = {}
-        tech_names = set()
+        # Строим граф связей по ID (более надежно)
+        graph = {}  # id -> [target_ids]
         
         for loc in locs:
-            if not loc.name:
-                continue
-                
-            # Собираем техлокации
-            if loc.tech:
-                tech_names.add(loc.name)
-            
-            graph[loc.name] = []
+            graph[loc.id] = []
             for link in loc.links:
-                target_name = link[1]  # target_name из кортежа
-                # Убираем проверку на phantom - нам важны все связи для достижимости
-                if target_name:
-                    graph[loc.name].append(target_name)
+                t_id = link[0]  # target_id
+                if t_id:
+                    graph[loc.id].append(t_id)
         
-        # Стартовые точки: начальная локация + все техлокации
-        start_name = locs[0].name if locs else None
-        start_points = ({start_name} | tech_names) if start_name else tech_names
+        # Стартовые точки: все техлокации
+        start_ids = {l.id for l in locs if l.tech}
         
-        if not start_points:
-            # Если нет стартовых точек, все нетехнические - сиротки
+        if not start_ids and locs:
+            start_ids.add(locs[0].id)  # Первая локация как запасной старт
+        
+        if not start_ids:
+            # Если совсем нет стартовых точек, все - сиротки
             for loc in locs:
                 if not loc.tech:
                     loc.orphan = True
                     self._add_warning(f"Сиротка '{loc.name}' на строке {loc.line}")
             return
         
-        # BFS от всех стартовых точек
-        reachable = set(start_points)
-        queue = list(start_points)
+        # BFS от всех стартовых точек  
+        reachable = set(start_ids)
+        queue = list(start_ids)
         
         while queue:
             current = queue.pop(0)
-            for target in graph.get(current, []):
-                if target not in reachable:
-                    reachable.add(target)
-                    queue.append(target)
+            for target_id in graph.get(current, []):
+                if target_id not in reachable:
+                    reachable.add(target_id)
+                    queue.append(target_id)
         
         # Помечаем недостижимые нетехнические локации как сиротки
         for loc in locs:
-            if loc.name and not loc.tech and loc.name not in reachable:
+            if not loc.tech and loc.id not in reachable:
                 loc.orphan = True
                 self._add_warning(f"Сиротка '{loc.name}' на строке {loc.line}")
 
@@ -342,18 +428,16 @@ class UrqParser:
         content = re.sub(r'"', '\'', content)
         
         lines = []
-        for line_text in content.split('\n'): # line_text - для ясности
+        for line_text in content.split('\n'):
             if re.match(r'^\s*if\b', line_text, re.IGNORECASE):
                 parts = re.split(r'\b(then|else)\b', line_text, flags=re.IGNORECASE)
-                # Используем list comprehension для краткости и эффективности
-                # lines.extend(p.strip() for p in parts if p.strip() and p.strip().lower() not in ('then', 'else'))
                 lines.extend(p.lstrip() for p in parts if p.lstrip() and p.lstrip().lower() not in ('then', 'else'))
             else:
                 lines.append(line_text)
         # Разбиваем по & и очищаем
         return '\n'.join(p.strip() for p in '\n'.join(lines).split('&') if p.strip())
 
-    def _detect_encoding(self, f_path): # f_path - file_path
+    def _detect_encoding(self, f_path):
         """Определяет кодировку файла"""
         if not os.path.exists(f_path):
             self._add_warning(f"Файл не найден: {f_path}")
@@ -361,7 +445,7 @@ class UrqParser:
         try:
             with open(f_path, 'rb') as f:
                 sample = f.read(1024)
-            for enc in ['cp1251', 'utf-8']: # cp1251 сначала
+            for enc in ['cp1251', 'utf-8']:  # cp1251 сначала
                 try:
                     sample.decode(enc)
                     return enc
@@ -373,10 +457,11 @@ class UrqParser:
             self._add_warning(f"Ошибка чтения файла {os.path.basename(f_path)}: {e}")
             return None
 
-    def _read_file(self, f_path): # f_path - file_path
+    def _read_file(self, f_path):
         """Читает файл"""
-        enc = self._detect_encoding(f_path) # encoding
-        if not enc: return None
+        enc = self._detect_encoding(f_path)
+        if not enc: 
+            return None
         try:
             with open(f_path, 'r', encoding=enc) as f:
                 return f.read()
@@ -384,10 +469,10 @@ class UrqParser:
             self._add_warning(f"Ошибка чтения файла {os.path.basename(f_path)}: {e}")
             return None
 
-    def _extract_description(self, l_cont): # l_cont - loc_content
+    def _extract_description(self, l_cont):
         """Извлекает описание из контента"""
         parts = [self._process_text_with_buttons(m.group(2).strip()).strip() 
-                 for m in TEXT_EXTRACTION.finditer(l_cont)] # m - match object
+                 for m in TEXT_EXTRACTION.finditer(l_cont)]
         return self._clean_final_text(' '.join(parts)) if parts else "Нет описания"       
     
     def _process_text_with_buttons(self, text):
@@ -400,52 +485,37 @@ class UrqParser:
             
     def _extract_inline_buttons(self, text, loc):
         """Извлекает инлайн кнопки из текста"""
-        for m in INLINE_BTN_PATTERN.finditer(text): # m - match object
-            desc_text = m.group(1) if m.group(1) is not None else "" # desc_text
-            target_text = m.group(2) if m.group(2) is not None else desc_text # target_text
-
-            # Если цель не указана явно (формат [[desc]]), используем desc как target
-            # Уже обработано в target_text = m.group(2) if m.group(2) is not None else desc_text
-            # desc_stripped = desc_text.strip()
-            # target_stripped = target_text.strip() if target_text else desc_stripped
+        for m in INLINE_BTN_PATTERN.finditer(text):
+            desc_text = m.group(1) if m.group(1) is not None else ""
+            target_text = m.group(2) if m.group(2) is not None else desc_text
+            self._add_link_with_prefixes(loc, target_text.strip(), "btn", desc_text.strip())
             
-            # Упрощено, так как desc_text и target_text уже содержат нужные значения
-            self._add_link_with_cycle_check(loc, target_text.strip(), "btn", desc_text.strip())
-            
-    def _add_link_with_cycle_check(self, loc, target, l_type, label): # l_type - link_type
-        """Добавляет связь с проверкой на цикл"""
-        # Стрипаем % или ! с начала ссылки и устанавливаем флаги
-        # % - меню в кнопке, ! - немедленные действия
+    def _add_link_with_prefixes(self, loc, target, l_type, label):
+        """Добавляет связь с обработкой префиксов % и !"""
         target = target.strip()
         is_menu = is_local = False
         
-        if target:
-            prefix = target[0]
-            if prefix in '%!':
-                target = target[1:] # Убираем префикс из имени цели
-                is_menu = (prefix == '%')
-                is_local = (prefix == '!')
-
-        # Case insensitive сравнение для проверки цикла
-        if target.lower() == loc.name.lower(): 
-            loc.cycle = True
+        if target and target[0] in '%!':
+            is_menu = (target[0] == '%')
+            is_local = (target[0] == '!')
+            target = target[1:]  # Убираем префикс
         
-        cl_label = "" # clean_label
-        if l_type == "btn":
-            # Стрипаем только если есть не-пробельные символы
-            stripped = label.strip()
-            cl_label = self._clean_button_text(stripped) if stripped else label
+        cl_label = self._clean_button_text(label.strip()) if l_type == "btn" and label.strip() else label
         
-        # (target_name, link_type, label, is_menu, is_local)
-        # is_phantom вычисляется позже в _resolve_target_ids
-        loc.links.append((target, l_type, cl_label, is_menu, is_local))
+        # Все ссылки пока добавляем с target_id=None, резолвим позже
+        self._add_link(loc, None, target, l_type, cl_label, True, is_menu, is_local)
                  
+    def _add_link(self, loc, t_id, t_name, l_type, label, is_ph, is_menu, is_local):
+        """Единый метод добавления связи в правильном формате"""
+        loc.links.append((t_id, t_name, l_type, label, is_ph, is_menu, is_local))
+        
     def _clean_button_text(self, text):
         """Очищает текст кнопки"""
-        if not text: return ""
-        return self._process_text_with_buttons(text).replace('"', "''")#.strip()
+        if not text: 
+            return ""
+        return self._process_text_with_buttons(text).replace('"', "''")
 
-    def _add_warning(self, msg): # msg - message
+    def _add_warning(self, msg):
         """Добавляет предупреждение"""
         self.warnings.append(f"URQ Parser Warning: {msg}")
 
