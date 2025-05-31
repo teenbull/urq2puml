@@ -101,6 +101,28 @@ class UrqParser:
         # print("=== END DEBUG ===\n")
         
         return locs
+        
+    def parse_string(self, qst_content_string, encoding='utf-8'):
+        """Парсит URQ строку и возвращает структуру"""
+        if not qst_content_string:
+            self._add_warning("Входная строка QST пуста.")
+            return []
+
+        # _prep_content ожидает строку, поэтому передаем напрямую
+        clean_content = self._prep_content(qst_content_string)
+        
+        # _get_locations ожидает оригинальный и очищенный контент
+        # Для parse_string оригинальный контент это сама входная строка
+        locs = self._get_locations(qst_content_string, clean_content)
+        
+        if not locs:
+            self._add_warning("В предоставленной строке QST не найдено ни одной метки.")
+            return []
+        
+        # Анализируем содержимое локаций
+        self._analyze_locations(locs, clean_content)
+        
+        return locs
 
     def _get_locations(self, orig_content, clean_content):
         """Извлекает локации с правильными номерами строк через двухэтапное сопоставление"""
@@ -350,7 +372,7 @@ class UrqParser:
         for loc in locs:
             graph[loc.id] = []
             for link in loc.links:
-                t_id = link[0]  # target_id
+                t_id = link[LINK_TARGET_ID]  # target_id
                 if t_id:
                     graph[loc.id].append(t_id)
         

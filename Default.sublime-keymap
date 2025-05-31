@@ -10,7 +10,13 @@
         "keys": ["ctrl+alt+f"],
         "command": "urq_fix",
         "context": [{ "key": "selector", "operator": "equal", "operand": "source.urql" }]
-    } 
+    },
+    {
+        "keys": ["ctrl+alt+s"],
+        "command": "urq_to_plantuml",
+        "args": {"stats": true},
+        "context": [{ "key": "selector", "operator": "equal", "operand": "source.urql" }]
+    }     
     // {
     //     "keys": ["ctrl+alt+u"],
     //     "command": "urq_to_plantuml",
