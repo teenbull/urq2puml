@@ -17,7 +17,7 @@ TOP_N = 5
 BAR_WIDTH = 20
 MAX_DEPTH = 20
 MAX_CHARS = 60
-MAX_PATHS = 1000  # Лимит путей для предотвращения взрыва
+MAX_PATHS = 500  # Лимит путей для предотвращения взрыва
 
 LINK_TUPLE_SIZE = 7
 

@@ -123,58 +123,59 @@ class PumlFormatter:
         
     def _group_by_prefix(self, locs):
         """Группирует локации по префиксам рекурсивно (до _ или пробела)"""
+        def split_name(name):
+            # return name.lower().replace(' ', '_').replace('.', '_').split('_')
+            return name.lower().replace(' ', '_').split('_')
+        
         def build_tree(locs_list, depth=0):
-            print(f"{'  ' * depth}Depth {depth}: Processing {len(locs_list)} locs: {[loc.name for loc in locs_list]}")
+            # print(f"{'  ' * depth}Depth {depth}: Processing {len(locs_list)} locs: {[loc.name for loc in locs_list]}")
             
             if depth > 3 or len(locs_list) < 2:
-                print(f"{'  ' * depth}Stopping: depth={depth}, count={len(locs_list)}")
+                # print(f"{'  ' * depth}Stopping: depth={depth}, count={len(locs_list)}")
                 return locs_list, {}
             
             groups, ungrouped = {}, []
             
             for loc in locs_list:
-                name_parts = loc.name.lower().replace(' ', '_').split('_')
-                print(f"{'  ' * depth}  {loc.name} -> parts: {name_parts}")
-                if len(name_parts) > depth:
-                    prefix = name_parts[depth] if depth < len(name_parts) else name_parts[-1]
+                parts = split_name(loc.name)
+                # print(f"{'  ' * depth}  {loc.name} -> parts: {parts}")
+                if len(parts) > depth:
+                    prefix = parts[depth]
                     groups.setdefault(prefix, []).append(loc)
-                    print(f"{'  ' * depth}    Added to group '{prefix}'")
+                    # print(f"{'  ' * depth}    Added to group '{prefix}'")
                 else:
                     ungrouped.append(loc)
-                    print(f"{'  ' * depth}    Added to ungrouped")
+                    # print(f"{'  ' * depth}    Added to ungrouped")
             
-            print(f"{'  ' * depth}Groups formed: {list(groups.keys())}")
+            # print(f"{'  ' * depth}Groups formed: {list(groups.keys())}")
             
-            # Рекурсивно группируем подгруппы
             final_groups = {}
             for prefix, group_locs in groups.items():
-                print(f"{'  ' * depth}Processing group '{prefix}' with {len(group_locs)} items")
-                if len(group_locs) > 1:
-                    # Проверяем, есть ли общий префикс у всех элементов группы
-                    min_parts = min(len(loc.name.lower().replace(' ', '_').split('_')) for loc in group_locs)
-                    if depth + 1 < min_parts:
-                        sub_ungrouped, sub_groups = build_tree(group_locs, depth + 1)
-                        # Создаем подгруппу только если есть значимая структура (>1 подгруппы или смешанная структура)
-                        if len(sub_groups) > 1 or (sub_groups and sub_ungrouped):
-                            final_groups[prefix] = (sub_ungrouped, sub_groups)
-                            print(f"{'  ' * depth}  Created final group '{prefix}' with subgroups")
-                        else:
-                            # Только одна подгруппа или все ungrouped - оставляем простую группу
-                            final_groups[prefix] = (group_locs, {})
-                            print(f"{'  ' * depth}  Created simple group '{prefix}' - no meaningful nesting")
-                    else:
-                        # Не хватает частей для дальнейшего деления
-                        final_groups[prefix] = (group_locs, {})
-                        print(f"{'  ' * depth}  Created simple group '{prefix}' - no more parts")
-                else:
+                # print(f"{'  ' * depth}Processing group '{prefix}' with {len(group_locs)} items")
+                if len(group_locs) == 1:
                     ungrouped.extend(group_locs)
-                    print(f"{'  ' * depth}  Single item '{prefix}' moved to ungrouped")
+                    # print(f"{'  ' * depth}  Single item '{prefix}' moved to ungrouped")
+                    continue
+                    
+                # Проверяем, можно ли группировать дальше
+                max_parts = max(len(split_name(loc.name)) for loc in group_locs)
+                if depth + 1 < max_parts:
+                    sub_ungrouped, sub_groups = build_tree(group_locs, depth + 1)
+                    # Создаем подгруппу только если есть значимая структура
+                    if len(sub_groups) > 1 or (sub_groups and sub_ungrouped):
+                        final_groups[prefix] = (sub_ungrouped, sub_groups)
+                        # print(f"{'  ' * depth}  Created final group '{prefix}' with subgroups")
+                    else:
+                        final_groups[prefix] = (group_locs, {})
+                        # print(f"{'  ' * depth}  Created simple group '{prefix}' - no meaningful nesting")
+                else:
+                    final_groups[prefix] = (group_locs, {})
+                    # print(f"{'  ' * depth}  Created simple group '{prefix}' - no more parts")
             
-            print(f"{'  ' * depth}Final result: {len(ungrouped)} ungrouped, {len(final_groups)} groups")
+            # print(f"{'  ' * depth}Final result: {len(ungrouped)} ungrouped, {len(final_groups)} groups")
             return ungrouped, final_groups
         
-        return build_tree(locs)
-          
+        return build_tree(locs)         
     def _render_location(self, loc, indent=""):
         """Рендерит одну локацию"""
         clean_name = self._limit_text(loc.name, LOC_LIMIT)
