@@ -1,0 +1,271 @@
+; Comprehensive Test File for QST to PUML Conversion
+
+; --- Test Case 1: Basic Location and Text ---
+:StartLocation
+pln This is the starting location.
+p This is additional text.
+end
+
+; --- Test Case 2: Comments ---
+:LocationWithComments
+; This is a line comment
+pln This location has comments.
+/* This is a
+   block comment */
+end
+
+; --- Test Case 3: GOTO Link ---
+:GotoTestSource
+pln This location will jump to another.
+goto GotoTestTarget
+end
+
+:GotoTestTarget
+pln This is the target of the GOTO.
+end
+
+; --- Test Case 4: BTN Link ---
+:ButtonTestSource
+pln This location has a button.
+btn ButtonTestTarget, Click Here
+end
+
+:ButtonTestTarget
+pln This is the target of the button.
+end
+
+; --- Test Case 5: Inline Links ---
+:InlineLinkSource
+pln This text contains [[InlineLinkTarget1]] and [[custom text|InlineLinkTarget2]].
+pln It also has a link with just target: [[InlineLinkTarget3]]
+end
+
+:InlineLinkTarget1
+pln Target for inline link 1.
+end
+
+:InlineLinkTarget2
+pln Target for inline link 2 (with custom text).
+end
+
+:InlineLinkTarget3
+pln Target for inline link 3 (target only).
+end
+
+; --- Test Case 6: Menu Link (%) ---
+:MenuLinkSource
+pln Go to the [[%MenuLocation|Menu]].
+btn %MenuLocationFromButton, Button Menu
+end
+
+:MenuLocation
+pln This is a menu location.
+end
+
+:MenuLocationFromButton
+pln This is a menu location reached by a button.
+end
+
+; --- Test Case 7: Local Link (!) ---
+:LocalLinkSource
+pln Jump to a [[!LocalLocation|Local Section]].
+btn !LocalLocationFromButton, Button Local
+end
+
+:LocalLocation
+pln This is a local location.
+end
+
+:LocalLocationFromButton
+pln This is a local location reached by a button.
+end
+
+; --- Test Case 8: Auto-transition ---
+:AutoTransitionSource
+pln This location will automatically transition to the next one.
+
+:AutoTransitionTarget
+pln This is the target of the auto-transition.
+end
+
+; --- Test Case 9: Duplicate Location Names ---
+:DuplicateName
+pln First instance of DuplicateName.
+end
+
+:AnotherLocation
+pln Some other location.
+btn DuplicateName, Go to Duplicate
+end
+
+:DuplicateName
+pln Second instance of DuplicateName.
+end
+
+; --- Test Case 10: Orphan Location ---
+:ReachableOrphan
+pln This location is reachable.
+goto ActualOrphan
+end
+
+:ActualOrphan
+pln This location should be an orphan if not for the goto above.
+end
+
+:TrueOrphan
+pln This location is a true orphan.
+end
+
+
+; --- Test Case 11: Special Location Names ---
+:common_stuff
+pln This is a common location.
+end
+
+:use_item_effect
+pln Effect of using an item.
+end
+
+:inv_status_check
+pln Checking inventory status.
+end
+
+; --- Test Case 12: Variables (var) ---
+:LocationWithVars
+pln This location sets variables.
+myVariable = 10
+anotherVar = "some_value"
+var WithSpace = true
+end
+
+; --- Test Case 13: Inventory (inv) ---
+:LocationWithInv
+pln This location adds items to inventory.
+inv+ key
+inv+ map
+end
+
+; --- Test Case 14: Empty/Malformed Inputs ---
+:EmptyLinks
+pln Links: [[]] [[|]] [[TargetOnlyButEmpty|]]
+btn , EmptyTargetButton
+btn EmptyLabelTarget,
+end
+
+:EmptyLocationName
+pln This location has no name (or rather, the previous one was empty).
+end
+
+:
+pln This location has an empty name.
+end
+
+
+; --- Test Case 15: Mixed Content ---
+:MixedContentLocation
+pln Text before link [[TargetA]].
+pln Text after link.
+goto TargetB
+pln This text is after goto, should ideally be ignored or handled.
+var item = 1
+inv+ gold
+btn TargetC, Go to C
+end
+
+:TargetA
+pln Target A.
+end
+
+:TargetB
+pln Target B.
+end
+
+:TargetC
+pln Target C.
+end
+
+; --- Test Case 16: Long Names and Text ---
+:ThisIsAVeryLongLocationNameThatMightCauseIssuesWithFormattingAndDisplayWidth
+pln This is a very long line of text designed to test how the parser and generator handle extremely long strings that could potentially overflow buffers or cause formatting problems in the output PUML diagram. It keeps going and going, much like a run-on sentence in a poorly written novel, just to ensure that length limits are either non-existent or gracefully handled.
+end
+
+; --- Test Case 17: Leading/Trailing Spaces ---
+:  LocationWithSpacesAroundName  
+  pln   This text has leading and trailing spaces.  
+goto   TargetWithSpacesAroundName  
+end
+
+:TargetWithSpacesAroundName
+pln Target reached despite spaces.
+end
+
+; --- Test Case 18: Complex Scenario (Combining Features) ---
+:ComplexStart
+pln Welcome to the complex test. [[!PlayerChoice|Choose your path]].
+var score = 0
+inv+ torch
+end
+
+:PlayerChoice
+pln Do you go [[LeftPath]] or [[RightPath]]?
+btn %ShowInventory, Check Inventory
+end
+
+:LeftPath
+pln You chose the left path.
+score = 10
+goto EndScenario
+end
+
+:RightPath
+pln You chose the right path.
+inv+ key
+score = 5
+goto EndScenario
+end
+
+:ShowInventory
+pln Showing inventory (menu).
+end
+
+:EndScenario
+pln The scenario ends. Your score is <$score>.
+end
+
+; --- Test Case 19: if/then/else and & (ampersand) chaining ---
+:IfElseTest
+pln Testing if/then/else and ampersand.
+if player_has_key = 1 then goto KeyRoom else goto NoKeyRoom & pln This text appears regardless of key.
+end
+
+:KeyRoom
+pln You have the key and entered the room.
+end
+
+:NoKeyRoom
+pln You don't have the key.
+end
+
+; --- Test Case 20: Technical location not being orphan ---
+:common_auto_link_target
+pln This is a target for an auto-link from a common.
+end
+
+:common_for_auto_link
+pln This common location should auto-link to common_auto_link_target.
+
+:common_auto_link_target ; Intentionally duplicated to test linking to first instance
+pln Duplicate of common_auto_link_target.
+end
+
+
+; --- Test Case 21: Correct Line Number Reporting (Visual Check) ---
+; This section is more for manual verification during development/debugging if errors occur.
+:LocationForLineCheck1
+pln Content for line check.
+goto NonExistentLocationForLineCheck ; Error expected here
+end
+
+:LocationForLineCheck2
+pln btn NonExistentTargetForLineCheck, Button
+end
