@@ -1,0 +1,28 @@
+[
+    {
+        "id": "preferences",
+        "children":
+        [
+            {
+                "id": "package-settings",
+                "children":
+                [
+                    {
+                        "caption": "URQ to PlantUML",
+                        "children":
+                        [
+                            {
+                                "caption": "Settings",
+                                "command": "edit_settings",
+                                "args": {
+                                    "base_file": "${packages}/urq2puml/urq2puml.sublime-settings",
+                                    "default": "{\n\t${0}\n}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+]
