@@ -94,14 +94,15 @@ STATE_DESC_FMT = '{}: {}\n'
 
 class PumlFormatter:
     """Форматтер PlantUML диаграмм"""
-    def __init__(self):
+    def __init__(self, options):
+        self.options = options
         self.warnings = []
 
     def _is_valid_loc(self, loc):
         """Проверяет валидность объекта локации"""
         return hasattr(loc, 'id') and hasattr(loc, 'name')
 
-    def format_puml(self, locs, show_proc_links=False):
+    def format_puml(self, locs):
         """Формирует содержимое PUML файла"""
         has_phantom = any(link[4] for loc in locs for link in loc.links if len(link) > 4)
         content_parts = []
@@ -115,7 +116,7 @@ class PumlFormatter:
         # Убираем отдельный цикл дубликатов - они уже обработаны в _render_location
 
         # Связи
-        content_parts.append(self._add_all_links(locs, show_proc_links=show_proc_links))
+        content_parts.append(self._add_all_links(locs))
         
         # Финальная сборка
         final_parts = ["@startuml\n"]
@@ -198,14 +199,14 @@ class PumlFormatter:
         elif hasattr(loc, 'orphan') and loc.orphan:
             state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)} <<orphan>>'
             desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
+        elif hasattr(loc, 'end') and loc.end:
+            state_line = f'{indent}{STATE_END_FMT.format(clean_name, loc.id)}'
+            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
         elif hasattr(loc, 'is_proc_target') and loc.is_proc_target:
             state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)} <<proc_target>>'
             desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"            
         elif hasattr(loc, 'cycle') and loc.cycle:
             state_line = f'{indent}{STATE_CYCLE_FMT.format(clean_name, loc.id)}'
-            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
-        elif hasattr(loc, 'end') and loc.end:
-            state_line = f'{indent}{STATE_END_FMT.format(clean_name, loc.id)}'
             desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
         else:
             state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)}'
@@ -239,7 +240,7 @@ class PumlFormatter:
         
         return parts
 
-    def _add_all_links(self, locs, show_proc_links=False):
+    def _add_all_links(self, locs):
         """Добавляет все связи (группировка не влияет на связи)"""
         parts = []
         
@@ -251,11 +252,11 @@ class PumlFormatter:
                     parts.append(self._format_phantom_link(loc.id, target_name, link_type, label))
                     self._add_warning(f"Локация '{target_name}' для {link_type} из '{loc.name}' не найдена")
                 else:
-                    parts.append(self._format_link(loc.id, target_id, link_type, label, is_menu, is_local, show_proc_links=show_proc_links))
+                    parts.append(self._format_link(loc.id, target_id, link_type, label, is_menu, is_local))
         
         return ''.join(parts)
 
-    def _format_link(self, source_id, target_id, link_type, label, is_menu=False, is_local=False, show_proc_links=False):
+    def _format_link(self, source_id, target_id, link_type, label, is_menu=False, is_local=False):
         """Форматирует обычные связи, включая спец. цвета для меню и локальных кнопок"""
         clean_label = self._limit_text(label, BTN_LIMIT)
         if link_type == "auto":            
@@ -270,7 +271,7 @@ class PumlFormatter:
         elif link_type == "goto":
             return GOTO_FMT.format(source_id, target_id)
         elif link_type == "proc":
-            if show_proc_links:
+            if self.options.proc_links:
                 # две стрелки (туда и обратно)
                 return PROC_FMT.format(source_id, target_id, target_id, source_id)
             else:

@@ -1,10 +1,13 @@
 {
-    // Показывать ли связи типа 'proc' на диаграмме.
-    // Если false, они будут показаны в упрощенном виде (обратно на локацию вызова)
-    "show_proc_links": false,
+    "puml_jar_path": "C:\\java\\plantuml-1.2025.2.jar",
+    "proc_links": false,
 
-    // Путь к plantuml.jar. Если пустой, плагин попытается найти его рядом с собой.
-    // Пример для Windows: "C:\\java\\plantuml.jar"
-    // Пример для Mac/Linux: "/usr/local/bin/plantuml.jar"
-    "puml_jar_path": ""
+    "colors": {
+        "end_color": "#d0f0d0",
+        "cycle_color": "#ffffcc"
+    },
+
+    "formats": {
+        "proc_full": "{} --> {} : [proc]\\n{} -[dotted]-> {}\\n"
+    }
 }

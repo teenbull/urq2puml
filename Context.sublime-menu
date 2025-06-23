@@ -49,12 +49,23 @@
                 "caption": "-"
             },            
             {
+                "caption": "Настройки...",
+                "command": "edit_settings",
+                "args": {
+                    "base_file": "${packages}/urq2puml/urq2puml.sublime-settings",
+                    "default": "{\n\t${0}\n}"
+                }
+            },       
+            {
+                "caption": "-"
+            },            
+            {
                 "caption": "СК",
                 "command": "urq_to_plantuml",
                 "args": {"stats": true}
             },         
             {
-                "caption": "*fix",
+                "caption": "fix urq",
                 "command": "urq_fix",
                 "args": {"stats": true}
             },      

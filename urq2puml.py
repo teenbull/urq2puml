@@ -32,11 +32,13 @@ try:
     from .puml_gen import PlantumlGen
     from .stats import get_stats
     from .urq_fixer import UrqFixer
+    from .settings import Settings
 except ImportError:
     from urq_parser import UrqParser
     from puml_gen import PlantumlGen
     from stats import get_stats
     from urq_fixer import UrqFixer
+    from settings import Settings
     
 class UrqFixCommand(sublime_plugin.TextCommand):
     """Команда для исправления проблем URQ"""
@@ -49,7 +51,6 @@ class UrqFixCommand(sublime_plugin.TextCommand):
             
         self.warnings = []
 
-        print(show_proc_links)
         try:
             # Определяем кодировку и читаем файл
             enc = self._detect_encoding(current_file)
@@ -135,8 +136,14 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             sublime.error_message("Файл должен быть URQ (.qst) или PlantUML (.puml)")
             return
 
+        # Читаем настройки из urq2puml.sublime-settings
+        sublime_settings = sublime.load_settings('urq2puml.sublime-settings')
+        options = Settings(sublime_settings) 
+        options.puml_jar_path = self.get_jar_path(options.puml_jar_path)            
+
         # Автопереключение на сетевой режим если jar потерялся
-        if not net and not self.jar_exists():
+        # if not net and not self.jar_exists():
+        if not net and not options.puml_jar_path:
             net = True
             print("URQ to PlantUML: JAR не найден, переключение на сетевой режим")
 
@@ -153,7 +160,8 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 except Exception as e:
                     self._add_warning(f"Ошибка чтения PUML файла: {e}")
                     return
-                gen = PlantumlGen(PUML_JAR_PATH if not net else None)
+                gen = PlantumlGen(options)
+                # gen = PlantumlGen(PUML_JAR_PATH if not net else None)
                 self.warnings.extend(gen.get_warnings())
             else:
                 # Парсим URQ файл
@@ -179,13 +187,10 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
                 # Генерируем PlantUML
                 puml_file = os.path.splitext(current_file)[0] + '.puml'
-                gen = PlantumlGen(PUML_JAR_PATH if not net else None)
-
-                # Читаем настройки из urq2puml.sublime-settings
-                settings = sublime.load_settings('urq2puml.sublime-settings')
-                proc_flag = settings.get('show_proc_links', True)
-
-                puml_content = gen.save_puml(result, puml_file, show_proc_links=proc_flag)
+                # gen = PlantumlGen(PUML_JAR_PATH if not net else None)
+                # puml_content = gen.save_puml(result, puml_file, show_proc_links=proc_flag)
+                gen = PlantumlGen(options)
+                puml_content = gen.save_puml(result, puml_file)
                 self.warnings.extend(gen.get_warnings())
 
                 
@@ -215,6 +220,22 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
             self._add_warning(f"Critical Error: Произошла ошибка при конвертации: {e}")
         finally:
             self._print_warnings()
+
+    def get_jar_path(self, path_from_settings):
+        """Определяет итоговый путь к JAR-файлу. Приоритет: настройки > папка плагина."""
+        
+        if path_from_settings and os.path.exists(path_from_settings):
+            print(f"URQ to PlantUML: Используется JAR из настроек: {path_from_settings}")
+            return path_from_settings
+        # Eсли в настройках нет валидного пути, то ищем в текущей папке
+        script_dir = os.path.dirname(__file__)
+        for f in os.listdir(script_dir):
+            if f.lower().startswith('plantuml') and f.lower().endswith('.jar'):
+                found_path = os.path.join(script_dir, f)
+                print(f"URQ to PlantUML: Найден JAR в папке плагина: {found_path}")
+                return found_path # <-- Возвращаем найденный путь
+        # Если ни в настройках, ни в папке плагина ничего нет, возвращаем пустую строку.
+        return ""
 
     def _gen_stats(self, result, current_file):
         """Генерит статистику в отдельном потоке"""
@@ -300,17 +321,17 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         progress_thread.daemon = True
         progress_thread.start()
 
-    def jar_exists(self):
-        global PUML_JAR_PATH
-        if os.path.exists(PUML_JAR_PATH):
-            return True
+    # def jar_exists(self):
+    #     global PUML_JAR_PATH
+    #     if os.path.exists(PUML_JAR_PATH):
+    #         return True
         
-        script_dir = os.path.dirname(__file__)
-        for f in os.listdir(script_dir):
-            if f.lower().startswith('plantuml') and f.lower().endswith('.jar'):
-                PUML_JAR_PATH = os.path.join(script_dir, f)
-                return True
-        return False
+    #     script_dir = os.path.dirname(__file__)
+    #     for f in os.listdir(script_dir):
+    #         if f.lower().startswith('plantuml') and f.lower().endswith('.jar'):
+    #             PUML_JAR_PATH = os.path.join(script_dir, f)
+    #             return True
+    #     return False
 
     def _open_file_in_default_program(self, file_path):
         """Открывает файл в программе по умолчанию"""

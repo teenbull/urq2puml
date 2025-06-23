@@ -50,15 +50,17 @@ class PlantumlOnlineGen:
 
 class PlantumlGen:
     """Генератор PlantUML файлов и диаграмм"""
-    def __init__(self, jar_path=None):
-        self.jar_path = jar_path
+    def __init__(self, options):
+        self.options = options
+        self.jar_path = options.puml_jar_path
         self.warnings = []
-        self.formatter = PumlFormatter()
+        # self.formatter = PumlFormatter()
 
-    def save_puml(self, locs, output_file, show_proc_links=False):
+    def save_puml(self, locs, output_file):
         """Сохраняет PUML файл"""
-        content = self.formatter.format_puml(locs, show_proc_links=show_proc_links)
-        self.warnings.extend(self.formatter.get_warnings())
+        formatter = PumlFormatter(self.options)
+        content = formatter.format_puml(locs)
+        self.warnings.extend(formatter.get_warnings())
         
         try:
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -159,5 +161,5 @@ class PlantumlGen:
 
     def get_warnings(self):
         """Возвращает предупреждения"""
-        combined_warnings = self.warnings + self.formatter.get_warnings()
+        combined_warnings = self.warnings# + self.formatter.get_warnings()
         return combined_warnings
