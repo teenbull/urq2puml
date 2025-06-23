@@ -51,6 +51,7 @@ class Loc:
         self.links = []         # [(target_id, target_name, type, label, is_phantom, is_menu, is_local)]
         self.vars = set()       # переменные
         self.invs = set()       # предметы инвентаря
+        self.is_proc_target = False       # локация, в которую приходит прок ссылка
 
     def __repr__(self):
         return f"Loc(id={self.id}, name='{self.name}', line={self.line}, links={len(self.links)}, flags={self._get_flags()})"    
@@ -280,7 +281,8 @@ class UrqParser:
         for m in PROC_CMD_PATTERN.finditer(l_cont):
             target = m.group(1).strip()
             if target: 
-                self._add_link_with_prefixes(loc, target, "proc", "")
+                # self._add_link_with_prefixes(loc, target, "proc", "")
+                self._add_link_with_prefixes(loc, target, "proc", target)
             else: 
                 self._add_warning(f"Пустая цель proc из '{loc.name}'")
 
@@ -333,6 +335,7 @@ class UrqParser:
                        target_loc = id_to_loc.get(t_id)
                        if target_loc:
                            target_loc.non_end = True
+                           if l_type == 'proc': target_loc.is_proc_target = True
                    continue
                
                # Резолвим по имени
@@ -356,6 +359,7 @@ class UrqParser:
                    target_loc = id_to_loc.get(new_id)
                    if target_loc:
                        target_loc.non_end = True
+                       if l_type == 'proc': target_loc.is_proc_target = True
            
            loc.links = res_links
        

@@ -1,6 +1,5 @@
 # PlantUML Formatter - формирует содержимое PlantUML диаграмм
 
-# ----------------------------------------------------------------------
 # Лимиты
 LOC_LIMIT = 40
 DESC_LIMIT = 50
@@ -27,6 +26,8 @@ END_COLOR = "#d0f0d0"
 BTN_MENU_COLOR = "dotted" # для кнопок-меню
 BTN_LOCAL_COLOR = "#cccccc,bold" # для локальных кнопок
 DOT_COLOR = "#5A6B7D" # серый для стартовой точки
+
+PROC_TARGET_COLOR = "#E6E6FA"  # Лавандовый цвет для локаций - целей proc
 # Цвета для технических локаций
 # TECH_COLOR = "#6fb4d4"  # светло-серый фон
 # TECH_FONT_COLOR = "#FFFFFF"  # белый текст
@@ -48,6 +49,10 @@ skinparam state {{
     BorderColor {BORDER_COLOR}
     FontColor {FONT_COLOR}
     ArrowFontColor {ARROW_FONT_COLOR}
+}}
+skinparam state<<proc_target>> {{
+    BackgroundColor {PROC_TARGET_COLOR}
+    BorderColor #9370DB
 }}
 skinparam state<<tech>> {{
     BackgroundColor {TECH_COLOR}
@@ -79,6 +84,7 @@ BTN_LOCAL = f"{{}} -[{BTN_LOCAL_COLOR}]-> {{}} : ({{}}) <$local_icon> \n"
 DOUBLE_FMT = '{}: [Дубликат метки, строка {}]\\n\\n{}\n'
 GOTO_FMT = "{} --> {} : [goto]\n"
 PROC_FMT = "{} --> {} : [proc]\n{} -[dotted]-> {}\n"
+PROC_FMT2 = "{} -[bold,dotted]-> {} : [proc] ({})\n"
 
 STATE_FMT = 'state "{}" as {}'
 STATE_CYCLE_FMT = f'state "{{}}" as {{}} {CYCLE_COLOR}' # For cycle states
@@ -95,7 +101,7 @@ class PumlFormatter:
         """Проверяет валидность объекта локации"""
         return hasattr(loc, 'id') and hasattr(loc, 'name')
 
-    def format_puml(self, locs):
+    def format_puml(self, locs, show_proc_links=False):
         """Формирует содержимое PUML файла"""
         has_phantom = any(link[4] for loc in locs for link in loc.links if len(link) > 4)
         content_parts = []
@@ -109,7 +115,7 @@ class PumlFormatter:
         # Убираем отдельный цикл дубликатов - они уже обработаны в _render_location
 
         # Связи
-        content_parts.append(self._add_all_links(locs))
+        content_parts.append(self._add_all_links(locs, show_proc_links=show_proc_links))
         
         # Финальная сборка
         final_parts = ["@startuml\n"]
@@ -192,6 +198,9 @@ class PumlFormatter:
         elif hasattr(loc, 'orphan') and loc.orphan:
             state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)} <<orphan>>'
             desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
+        elif hasattr(loc, 'is_proc_target') and loc.is_proc_target:
+            state_line = f'{indent}{STATE_FMT.format(clean_name, loc.id)} <<proc_target>>'
+            desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"            
         elif hasattr(loc, 'cycle') and loc.cycle:
             state_line = f'{indent}{STATE_CYCLE_FMT.format(clean_name, loc.id)}'
             desc_line = f"{indent}{STATE_DESC_FMT.format(loc.id, clean_desc)}"
@@ -230,7 +239,7 @@ class PumlFormatter:
         
         return parts
 
-    def _add_all_links(self, locs):
+    def _add_all_links(self, locs, show_proc_links=False):
         """Добавляет все связи (группировка не влияет на связи)"""
         parts = []
         
@@ -242,16 +251,16 @@ class PumlFormatter:
                     parts.append(self._format_phantom_link(loc.id, target_name, link_type, label))
                     self._add_warning(f"Локация '{target_name}' для {link_type} из '{loc.name}' не найдена")
                 else:
-                    parts.append(self._format_link(loc.id, target_id, link_type, label, is_menu, is_local))
+                    parts.append(self._format_link(loc.id, target_id, link_type, label, is_menu, is_local, show_proc_links=show_proc_links))
         
         return ''.join(parts)
 
-    def _format_link(self, source_id, target_id, link_type, label, is_menu=False, is_local=False):
+    def _format_link(self, source_id, target_id, link_type, label, is_menu=False, is_local=False, show_proc_links=False):
         """Форматирует обычные связи, включая спец. цвета для меню и локальных кнопок"""
+        clean_label = self._limit_text(label, BTN_LIMIT)
         if link_type == "auto":            
             return AUTO_FMT.format(source_id, target_id)
         elif link_type == "btn":
-            clean_label = self._limit_text(label, BTN_LIMIT)
             if is_menu:
                 return BTN_MENU.format(source_id, target_id, clean_label)
             elif is_local:
@@ -261,7 +270,13 @@ class PumlFormatter:
         elif link_type == "goto":
             return GOTO_FMT.format(source_id, target_id)
         elif link_type == "proc":
-            return PROC_FMT.format(source_id, target_id, target_id, source_id)
+            if show_proc_links:
+                # две стрелки (туда и обратно)
+                return PROC_FMT.format(source_id, target_id, target_id, source_id)
+            else:
+                # Рисуем одну жирную пунктирную стрелку туда-обратно
+                # на саму локацию-источник, чтобы показать, что был вызов и возврат.
+                return PROC_FMT2.format(source_id, source_id, clean_label)
         
         return ""
 

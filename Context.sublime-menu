@@ -52,7 +52,12 @@
                 "caption": "СК",
                 "command": "urq_to_plantuml",
                 "args": {"stats": true}
-            },            
+            },         
+            {
+                "caption": "*fix",
+                "command": "urq_fix",
+                "args": {"stats": true}
+            },      
 
         ]
     }

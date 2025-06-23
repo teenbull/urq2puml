@@ -3,7 +3,7 @@
 
 # ----------------------------------------------------------------------
 # Путь к jar файлу с https://plantuml.com/ru/download                  #
-# Если файл не найдет - будет попытка генерить граф онлайн             #
+# Если файл не найден - будет попытка генерить граф онлайн             #
 PUML_JAR_PATH = "C:\\java\\plantuml-1.2025.2.jar"                      #
 # ----------------------------------------------------------------------
  
@@ -48,7 +48,8 @@ class UrqFixCommand(sublime_plugin.TextCommand):
             return
             
         self.warnings = []
-        
+
+        print(show_proc_links)
         try:
             # Определяем кодировку и читаем файл
             enc = self._detect_encoding(current_file)
@@ -179,7 +180,12 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                 # Генерируем PlantUML
                 puml_file = os.path.splitext(current_file)[0] + '.puml'
                 gen = PlantumlGen(PUML_JAR_PATH if not net else None)
-                puml_content = gen.save_puml(result, puml_file)
+
+                # Читаем настройки из urq2puml.sublime-settings
+                settings = sublime.load_settings('urq2puml.sublime-settings')
+                proc_flag = settings.get('show_proc_links', True)
+
+                puml_content = gen.save_puml(result, puml_file, show_proc_links=proc_flag)
                 self.warnings.extend(gen.get_warnings())
 
                 

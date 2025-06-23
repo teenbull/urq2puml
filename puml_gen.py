@@ -55,9 +55,9 @@ class PlantumlGen:
         self.warnings = []
         self.formatter = PumlFormatter()
 
-    def save_puml(self, locs, output_file):
+    def save_puml(self, locs, output_file, show_proc_links=False):
         """Сохраняет PUML файл"""
-        content = self.formatter.format_puml(locs)
+        content = self.formatter.format_puml(locs, show_proc_links=show_proc_links)
         self.warnings.extend(self.formatter.get_warnings())
         
         try:
