@@ -75,6 +75,8 @@ class UrqParser:
         if not orig_content:
             return []
         
+        # Собираем все инклюды в кучу
+        orig_content = self._proc_includes(orig_content, os.path.dirname(os.path.abspath(file_path)))
         clean_content = self._prep_content(orig_content)
         
         # Получаем локации с правильными номерами строк
@@ -102,7 +104,38 @@ class UrqParser:
         # print("=== END DEBUG ===\n")
         
         return locs
+
+    def _proc_includes(self, cont, base, done=None, root_base=None):
+        """Собирает инклюды рекурсивно с логированием строк"""
+        if done is None: done = set()
+        if root_base is None: root_base = base
         
+        inc_pat = re.compile(r'^\s*%include\s+([^\r\n;]+)', re.M | re.I)
+        orig_lines = cont.count('\n') + 1
+        clean_cont = inc_pat.sub('', cont)
+        result_parts = [clean_cont]; total_lines = clean_cont.count('\n') + 1
+        
+        for m in inc_pat.finditer(cont):
+            path = COMMENTS_REMOVAL.sub('', m.group(1)).strip()
+            
+            if not path or path[0] in '/\\' or ':' in path:
+                self._add_warning(f"Плохой путь: {path}"); continue
+            
+            full = os.path.normpath(os.path.join(root_base, path))
+            if full in done: continue
+            
+            inc = self._read_file(full)
+            if inc:
+                done.add(full); fname = os.path.basename(full)
+                inc = self._proc_includes(inc, root_base, done, root_base)
+                inc_lines = inc.count('\n') + 1; total_lines += inc_lines
+                result_parts.append('\n' + inc)
+                print(f"{fname}: {inc_lines} строк, с инклюдами: {total_lines} строк")
+            else:
+                self._add_warning(f"Файл не найден: {path}")
+        
+        return ''.join(result_parts)
+
     def parse_string(self, qst_content_string, encoding='utf-8'):
         """Парсит URQ строку и возвращает структуру"""
         if not qst_content_string:
