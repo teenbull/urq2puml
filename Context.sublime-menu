@@ -67,7 +67,6 @@
             {
                 "caption": "fix urq",
                 "command": "urq_fix",
-                "args": {"stats": true}
             },      
 
         ]

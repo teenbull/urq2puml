@@ -8,6 +8,7 @@ import re
 # Комментировать строки сироток
 COMMENT_ORPHANS = True
 COMMENT_DUPLICATES = True
+MOVE_DUPLICATES = False
 
 # Относительные импорты для Sublime Text
 try:
@@ -56,65 +57,49 @@ class UrqFixer:
         if not orphans and not duplicates:
             return content, None
         
-        # Разбиваем контент на строки для работы по номерам строк
-        lines = content.split('\n')
-        
-        # Собираем диапазоны строк для удаления
-        ranges_to_remove = []
-        orphan_content = ""
-        duplicate_content = ""
-        
-        # Сортируем все локации по номеру строки для правильного определения границ
+        lines = content.split('\n'); ranges_to_remove = []; orphan_content = ""; duplicate_content = ""
         sorted_locs = sorted(locs, key=lambda x: x.line)
         
         for i, loc in enumerate(sorted_locs):
-            if not (loc.orphan or loc.dup):
+            if not (loc.orphan or (loc.dup and MOVE_DUPLICATES)):  # Проверяем флаг MOVE_DUPLICATES
                 continue
                 
-            start_line = loc.line - 1  # Переводим в 0-based индексацию
+            start_line = loc.line - 1
+            end_line = sorted_locs[i + 1].line - 1 if i + 1 < len(sorted_locs) else len(lines)
+            loc_lines = lines[start_line:end_line]; loc_content = '\n'.join(loc_lines)
             
-            # Находим конец локации: начало следующей локации или конец файла
-            if i + 1 < len(sorted_locs):
-                end_line = sorted_locs[i + 1].line - 1
-            else:
-                end_line = len(lines)
-            
-            # Извлекаем содержимое локации
-            loc_lines = lines[start_line:end_line]
-            loc_content = '\n'.join(loc_lines)
-            
-            if loc_content.strip():  # Только если есть контент
+            if loc_content.strip():
                 ranges_to_remove.append((start_line, end_line))
-                
-                if loc.orphan:
-                    orphan_content += loc_content + '\n'
-                if loc.dup:
-                    duplicate_content += loc_content + '\n'
+                if loc.orphan: orphan_content += loc_content + '\n'
+                if loc.dup and MOVE_DUPLICATES: duplicate_content += loc_content + '\n'
         
-        if not ranges_to_remove:
+        # Обработка дубликатов без перемещения (только комментирование)
+        if duplicates and not MOVE_DUPLICATES:
+            for loc in duplicates:
+                start_line = loc.line - 1
+                if start_line < len(lines) and not lines[start_line].strip().startswith(';'):
+                    lines[start_line] = f"; {lines[start_line]}"
+            self._add_warning(f"Закомментировано {len(duplicates)} дубликатов")
+        
+        if not ranges_to_remove and not (duplicates and not MOVE_DUPLICATES):
             return content, None
         
-        # Удаляем проблемные локации (в обратном порядке по номерам строк)
+        # Удаляем только перемещаемые локации
         ranges_to_remove.sort(key=lambda x: x[0], reverse=True)
         for start_line, end_line in ranges_to_remove:
             del lines[start_line:end_line]
         
-        # Формируем новый контент
-        new_content = '\n'.join(lines).rstrip()
-        scroll_line = len(lines) + 1  # Строка где начнутся комментарии
-        final_block = ""
+        new_content = '\n'.join(lines).rstrip(); scroll_line = len(lines) + 1; final_block = ""
         
         if orphan_content:
             sep = "\n\n; " + "-" * 50 + "\n; Потерянные локации:\n; " + "-" * 50 + "\n\n"
-            processed_content = self._comment_content(orphan_content.rstrip(), COMMENT_ORPHANS)
-            final_block += sep + processed_content
+            final_block += sep + self._comment_content(orphan_content.rstrip(), COMMENT_ORPHANS)
             self._add_warning(f"Перемещено {len(orphans)} локаций-сироток")
         
         if duplicate_content:
             sep = "\n\n; " + "-" * 50 + "\n; Дубликаты:\n; " + "-" * 50 + "\n\n"
-            processed_content = self._comment_content(duplicate_content.rstrip(), COMMENT_DUPLICATES)
-            final_block += sep + processed_content
-            self._add_warning(f"Перемещено {len(duplicates)} дубликатов")
+            final_block += sep + self._comment_content(duplicate_content.rstrip(), COMMENT_DUPLICATES)
+            self._add_warning(f"Перемещено {len([d for d in duplicates if MOVE_DUPLICATES])} дубликатов")
         
         return new_content + final_block, scroll_line
 
