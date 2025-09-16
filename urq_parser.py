@@ -4,7 +4,7 @@
 import re
 import os
 from collections import deque
-from .encoding_utils import detect_encoding
+from .encoding import detect_encoding
 
 # Регулярки для парсинга URQ
 LOC_PATTERN = re.compile(r'^\s*:([^\n]+)', re.M)

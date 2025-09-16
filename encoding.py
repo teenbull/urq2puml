@@ -26,7 +26,7 @@ def detect_encoding(f_path, warnings_callback=None):
             sample = f.read(ENCODING_BUFFER_SIZE)
             
         if warnings_callback:
-            warnings_callback(f"Обнаружен файл {os.path.basename(f_path)}, размер образца: {len(sample)} байт")
+            warnings_callback(f"Обнаружен файл {os.path.basename(f_path)}")
             
         # Проверяем UTF-8 с BOM
         if sample.startswith(b'\xef\xbb\xbf'):
@@ -35,7 +35,7 @@ def detect_encoding(f_path, warnings_callback=None):
             return 'utf-8-sig'
             
         # Проверяем остальные кодировки
-        for enc in ['cp1251', 'utf-8']:  # cp1251 сначала для QST
+        for enc in ['utf-8','cp1251']:
             try:
                 decoded = sample.decode(enc)
                 if warnings_callback:

@@ -14,13 +14,13 @@ import subprocess
 import importlib
 import threading
 import time
-from .encoding_utils import detect_encoding
 
 modules_to_reload = [
     'URQ2PUML.urq_parser',
-    'URQ2PUML.puml_gen',
+    'URQ2PUML.puml_gen', 
     'URQ2PUML.stats',
     'URQ2PUML.urq_fixer',
+    'URQ2PUML.encoding', 
 ]
 
 for module_name in modules_to_reload:
@@ -34,12 +34,14 @@ try:
     from .stats import get_stats
     from .urq_fixer import UrqFixer
     from .settings import Settings
+    from .encoding import detect_encoding
 except ImportError:
     from urq_parser import UrqParser
     from puml_gen import PlantumlGen
     from stats import get_stats
     from urq_fixer import UrqFixer
     from settings import Settings
+    from encoding import detect_encoding 
     
 class UrqFixCommand(sublime_plugin.TextCommand):
     """Команда для исправления проблем URQ"""
