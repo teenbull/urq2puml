@@ -14,6 +14,7 @@ import subprocess
 import importlib
 import threading
 import time
+from .encoding_utils import detect_encoding
 
 modules_to_reload = [
     'URQ2PUML.urq_parser',
@@ -87,25 +88,9 @@ class UrqFixCommand(sublime_plugin.TextCommand):
             self._print_warnings()
                 
     def _detect_encoding(self, f_path):
-        """Определяет кодировку файла (копия из urq_parser)"""
-        if not os.path.exists(f_path):
-            self._add_warning(f"Файл не найден: {f_path}")
-            return None
-        try:
-            with open(f_path, 'rb') as f:
-                sample = f.read(1024)
-            for enc in ['cp1251', 'utf-8']:  # cp1251 сначала
-                try:
-                    sample.decode(enc)
-                    return enc
-                except UnicodeDecodeError:
-                    continue
-            self._add_warning(f"Не удалось определить кодировку файла {os.path.basename(f_path)}")
-            return None
-        except IOError as e:
-            self._add_warning(f"Ошибка чтения файла {os.path.basename(f_path)}: {e}")
-            return None
-    
+        """Определяет кодировку файла"""
+        return detect_encoding(f_path, self._add_warning)
+        
     def _add_warning(self, message):
         """Добавляет предупреждение в список"""
         full_msg = f"URQ Fix Orphans Warning: {message}"

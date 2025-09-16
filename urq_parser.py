@@ -4,6 +4,7 @@
 import re
 import os
 from collections import deque
+from .encoding_utils import detect_encoding
 
 # Регулярки для парсинга URQ
 LOC_PATTERN = re.compile(r'^\s*:([^\n]+)', re.M)
@@ -462,29 +463,9 @@ class UrqParser:
         # Разбиваем по & и очищаем
         return '\n'.join(p.strip() for p in '\n'.join(lines).split('&') if p.strip())
 
-    def _detect_encoding(self, f_path):
-        """Определяет кодировку файла"""
-        if not os.path.exists(f_path):
-            self._add_warning(f"Файл не найден: {f_path}")
-            return None
-        try:
-            with open(f_path, 'rb') as f:
-                sample = f.read(ENCODING_BUFFER_SIZE)
-            for enc in ['cp1251', 'utf-8']:  # cp1251 сначала
-                try:
-                    sample.decode(enc)
-                    return enc
-                except UnicodeDecodeError:
-                    continue
-            self._add_warning(f"Не удалось определить кодировку файла {os.path.basename(f_path)}")
-            return None
-        except IOError as e:
-            self._add_warning(f"Ошибка чтения файла {os.path.basename(f_path)}: {e}")
-            return None
-
     def _read_file(self, f_path):
         """Читает файл"""
-        enc = self._detect_encoding(f_path)
+        enc = detect_encoding(f_path, self._add_warning)
         if not enc:
             self._add_warning(f"Не удалось прочитать файл {os.path.basename(f_path)} - неизвестная кодировка")
             return None

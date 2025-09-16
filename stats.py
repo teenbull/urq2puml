@@ -15,7 +15,7 @@ BRANCH_MIN = 3
 LONG_LABEL = 80
 TOP_N = 5
 BAR_WIDTH = 20
-MAX_DEPTH = 20
+MAX_DEPTH = 50
 MAX_CHARS = 60
 MAX_PATHS = 500  # Лимит путей для предотвращения взрыва
 
