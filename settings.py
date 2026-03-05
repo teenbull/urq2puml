@@ -1,6 +1,5 @@
 # settings.py
 # Определяет классы для хранения и управления настройками плагина.
-
 class ColorOptions:
     """Хранит все настройки цветов."""
     def __init__(self, config_dict=None):
@@ -33,3 +32,4 @@ class Settings:
         # Общие настройки, не вошедшие в группы
         self.puml_jar_path = cfg.get('puml_jar_path', "")
         self.proc_links = cfg.get('proc_links', True)
+        self.stats_analyze_paths = cfg.get('stats_analyze_paths', True)

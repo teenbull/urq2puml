@@ -1,12 +1,11 @@
 {
     "puml_jar_path": "C:\\java\\plantuml-1.2025.2.jar",
     "proc_links": false,
-
+    "stats_analyze_paths": false,
     "colors": {
         "end_color": "#d0f0d0",
         "cycle_color": "#ffffcc"
     },
-
     "formats": {
         "proc_full": "{} --> {} : [proc]\\n{} -[dotted]-> {}\\n"
     }

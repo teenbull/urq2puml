@@ -162,7 +162,8 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
 
                 # --- Статистика в отдельном потоке ---
                 if stats:
-                    stats_thread = threading.Thread(target=self._gen_stats, args=(result, current_file))
+                    analyze_paths = options.stats_analyze_paths
+                    stats_thread = threading.Thread(target=self._gen_stats, args=(result, current_file, analyze_paths))
                     stats_thread.daemon = True
                     stats_thread.start()
                     
@@ -224,10 +225,10 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
         # Если ни в настройках, ни в папке плагина ничего нет, возвращаем пустую строку.
         return ""
 
-    def _gen_stats(self, result, current_file):
+    def _gen_stats(self, result, current_file, analyze_paths=True):
         """Генерит статистику в отдельном потоке"""
         try:
-            stats_text = get_stats(result)
+            stats_text = get_stats(result, analyze_paths=analyze_paths)
             if stats_text:
                 # Обновляем UI в главном потоке
                 sublime.set_timeout(lambda: self._show_stats(stats_text, current_file), 0)
