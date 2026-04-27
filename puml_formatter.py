@@ -110,6 +110,8 @@ class PumlFormatter:
         # Группируем локации
         ungrouped, groups = self._group_by_prefix(locs)
         
+        # Сбрасываем счётчик групп для уникальных ID
+        self._group_counter = 0
         # Рендерим все группы и локации (включая дубликаты)
         content_parts.extend(self._render_groups(groups, ungrouped, locs=locs))
 
@@ -231,7 +233,8 @@ class PumlFormatter:
         
         # Группы с уникальными ID
         for prefix, (sub_ungrouped, sub_groups) in sorted(groups.items()):
-            group_id = f"grp_{prefix}_{id((sub_ungrouped, sub_groups))}"  # Уникальный ID
+            self._group_counter += 1
+            group_id = f"grp_{self._group_counter}"  # уникальный числовой ID, без кириллицы
             parts.extend([
                 f'{indent}state "{prefix.capitalize()}" as {group_id} <<group>> {{\n',
                 *self._render_groups(sub_groups, sub_ungrouped, indent + "    ", locs),
