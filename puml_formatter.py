@@ -166,10 +166,10 @@ legend top left
 endlegend
 """
 
-    def format_puml(self, locs):
+    def format_puml(self, locs, legend=True):
         """Формирует содержимое PUML файла"""
-        has_phantom = any(link[4] for loc in locs for link in loc.links if len(link) > 4)
-        content_parts = []
+        has_phantom = any(link[ 4 ] for loc in locs for link in loc.links if len(link) > 4)
+        content_parts = [ ]
         
         # Группируем локации
         ungrouped, groups = self._group_by_prefix(locs)
@@ -179,18 +179,15 @@ endlegend
         # Рендерим все группы и локации (включая дубликаты)
         content_parts.extend(self._render_groups(groups, ungrouped, locs=locs))
 
-        # Убираем отдельный цикл дубликатов - они уже обработаны в _render_location
-
         # Связи
         content_parts.append(self._add_all_links(locs))
         
         # Финальная сборка
-        final_parts = ["@startuml\n"]
+        final_parts = [ "@startuml\n" ]
 
-        # добавляем легенду
-        if getattr(self.options, 'show_legend', True):
+        # Добавляем легенду, если она включена в настройках и разрешена параметром
+        if getattr(self.options, 'show_legend', True) and legend:
             final_parts.append(self._get_legend())
-
 
         if has_phantom:
             final_parts.append(PHANTOM_NODE)

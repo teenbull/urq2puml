@@ -15,7 +15,8 @@ except ImportError:
 
 class PlantumlOnlineGen:
     """Онлайн генератор PlantUML"""
-    def __init__(self, server_url="http://www.plantuml.com/plantuml/"):
+    # Изменен протокол на https
+    def __init__(self, server_url="https://www.plantuml.com/plantuml/"):
         self.server_url = server_url
         self.p_alpha = string.digits + string.ascii_uppercase + string.ascii_lowercase + '-_'
         self.b64_alpha = string.ascii_uppercase + string.ascii_lowercase + string.digits + '+/'
@@ -26,8 +27,15 @@ class PlantumlOnlineGen:
         enc = zlib.compress(text.encode('utf-8'))[2:-4]
         enc_b64 = base64.b64encode(enc).decode().translate(self.b64_to_p)
         url = f"{self.server_url}{type}/{enc_b64}"
+        
+        # Проверка лимита: если URL слишком длинный, сервер все равно выдаст 414 URI Too Long
+        if len(url) > 4000:
+            print(f"Online Gen Error: Превышен лимит. Длина QST: {len(text)}, Длина сжатого URL: {len(url)}")
+            raise ValueError(f"Слишком большой файл для онлайн-генерации (URL {len(url)} > 4000). Пожалуйста, используйте оффлайн режим.")
+
         h = {'User-Agent': 'Sublime URQ2PUML'}
         try:
+            print(f"Online Gen: Отправка {type.upper()}, размер URL: {len(url)} байт")
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=30) as resp:
                 if resp.getcode() == 200:
                     return resp.read()
@@ -35,7 +43,9 @@ class PlantumlOnlineGen:
                 err_msg = f"HTTP Error {resp.getcode()}: {resp.reason}. Body: {err_body}"
                 print(f"Online Gen Error Details: {err_msg}")
                 raise urllib.error.HTTPError(url, resp.getcode(), err_msg, resp.headers, None)
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as e:
+            # Выводим код ошибки и размер в консоль Sublime
+            print(f"Online Gen HTTP Error: Код {e.code}, Длина URL: {len(url)}")
             raise
         except Exception as e:
             raise RuntimeError(f"Сервер PlantUML ({type(e).__name__}) ошибка: {e}")
@@ -56,10 +66,12 @@ class PlantumlGen:
         self.warnings = []
         # self.formatter = PumlFormatter()
 
-    def save_puml(self, locs, output_file):
+    def save_puml(self, locs, output_file, legend=True):
         """Сохраняет PUML файл"""
         formatter = PumlFormatter(self.options)
-        content = formatter.format_puml(locs)
+        
+        # Прокидываем параметр в форматтер
+        content = formatter.format_puml(locs, legend=legend)
         self.warnings.extend(formatter.get_warnings())
         
         try:
@@ -139,8 +151,9 @@ class PlantumlGen:
         """Генерирует файл через онлайн сервис"""
         try:
             print(f"PlantUML Gen: {file_type.upper()} генерируется онлайн...")
-            
             gen = PlantumlOnlineGen()
+            
+            # Если URL превысит лимит, gen.generate_png выбросит ValueError
             data = gen.generate_png(puml_content) if file_type == 'png' else gen.generate_svg(puml_content)
             
             output_file = os.path.splitext(puml_file)[0] + '.' + file_type
@@ -150,9 +163,13 @@ class PlantumlGen:
             print(f"PlantUML Gen: {file_type.upper()} создан онлайн: {output_file}")
             return True
             
+        except ValueError as ve:
+            self._add_warning(str(ve))
+            sublime.error_message(str(ve))
+            return False
         except Exception as e:
             self._add_warning(f"Онлайн ошибка {file_type.upper()}: {e}")
-            sublime.error_message("Ошибка при попытке онлайн генерации. Возможно, файл слишком велик - попробуйте оффлайн способ (см. readme.md).")
+            sublime.error_message("Ошибка при попытке онлайн генерации. Проверьте консоль.")
             return False
 
     def _add_warning(self, message):

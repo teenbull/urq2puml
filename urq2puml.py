@@ -173,13 +173,12 @@ class UrqToPlantumlCommand(sublime_plugin.TextCommand):
                         return 
 
                 # Генерируем PlantUML
-                puml_file = os.path.splitext(current_file)[0] + '.puml'
-                # gen = PlantumlGen(PUML_JAR_PATH if not net else None)
-                # puml_content = gen.save_puml(result, puml_file, show_proc_links=proc_flag)
+                puml_file = os.path.splitext(current_file)[ 0 ] + '.puml'
                 gen = PlantumlGen(options)
-                puml_content = gen.save_puml(result, puml_file)
+                
+                # Передаем параметр легенды: в сетевом режиме отключаем
+                puml_content = gen.save_puml(result, puml_file, legend=not net)
                 self.warnings.extend(gen.get_warnings())
-
                 
             if os.path.exists(puml_file):
                 # Не открывать лишний раз puml файл
