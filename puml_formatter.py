@@ -44,6 +44,7 @@ PHANTOM_NODE = f"""state "//phantom" as PHANTOM_NODE_URQ {PHANTOM_COLOR} {{
 }}
 """
 SKIN_PARAMS = f"""skinparam stateArrowColor {ARROW_COLOR}
+skinparam StartNodeColor {DOT_COLOR}
 skinparam state {{
     BackgroundColor {STATE_BG_COLOR}
     BorderColor {BORDER_COLOR}
@@ -73,7 +74,8 @@ sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12">
 </svg>
 """
 
-START_LOC = f"[*] {DOT_COLOR} --> {{}} \n"  # Template for start location
+# START_LOC = f"[*] {DOT_COLOR} --> {{}} \n"  # Template for start location
+START_LOC = "[*] --> {} \n"
 
 # Форматы связей
 AUTO_FMT = "{} -[dotted]-> {}\n"
