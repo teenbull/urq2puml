@@ -25,6 +25,8 @@ class Settings:
         # settings_object - это объект, возвращаемый sublime.load_settings
         cfg = settings_object or {}
         
+        self.show_legend = cfg.get('show_legend', True) # показываем легенду?
+
         # Создаем экземпляры дочерних классов, передавая им соответствующую часть словаря настроек
         self.colors = ColorOptions(cfg.get('colors', {}))
         self.formats = FormatOptions(cfg.get('formats', {}))

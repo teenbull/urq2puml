@@ -19,8 +19,11 @@ PROC_CMD_PATTERN = re.compile(r'^\s*\bproc\s+(.+)', re.M | re.I)
 INLINE_BTN_PATTERN = re.compile(r'\[\[([^\]|]*?)(?:\|([^\]]*?))?\]\]')
 PLN_TEXT_EXTRACTOR = re.compile(r"^(?:pln|p)\s(.*)$")
 TEXT_EXTRACTION = re.compile(r"^(pln|p)\s(.*)$", re.M)
-COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.M | re.DOTALL)
-COLON_PATTERN = re.compile(r':([^\n]*)')
+# COMMENTS_REMOVAL = re.compile(r'/\*.*?\*/|;[^\n]*', re.M | re.DOTALL)
+# COMMENTS_REMOVAL = re.compile(r'/\*.*?(?:\*/|$)|;[^\n]*', re.DOTALL)
+
+# COLON_PATTERN = re.compile(r':([^\n]*)')
+COLON_PATTERN = re.compile(r'^\s*:([^\n]*)')
 
 VAR_PATTERN = re.compile(r'^\s*([^=\n]+?)\s*=', re.M)
 INV_PATTERN = re.compile(r'^\s*inv\+\s*(.+)', re.M | re.I)
@@ -37,6 +40,59 @@ LINK_IS_PHANTOM = 4
 LINK_IS_MENU = 5
 LINK_IS_LOCAL = 6
 
+def remove_urq_comments(text):
+    """
+    Правильный алгоритм удаления комментариев по законам URQ:
+    - Поддерживает ЛЮБУЮ вложенность /* /* ... */ */
+    - Удаляет строчные комментарии ;
+    - Сохраняет все переносы строк \n для правильной нумерации!
+    """
+    result =[]
+    i = 0
+    n = len(text)
+    nesting = 0
+    in_line_comment = False
+
+    while i < n:
+        # Обработка строчного комментария (до конца строки)
+        if in_line_comment:
+            if text[i] == '\n':
+                in_line_comment = False
+                result.append('\n')
+            i += 1
+            continue
+
+        # Начало блочного комментария (поддерживаем вложенность)
+        if i < n - 1 and text[i:i+2] == '/*':
+            nesting += 1
+            i += 2
+            continue
+
+        # Конец блочного комментария
+        if i < n - 1 and text[i:i+2] == '*/':
+            if nesting > 0:
+                nesting -= 1
+                i += 2
+                continue
+
+        # Начало строчного комментария
+        if nesting == 0 and text[i] == ';':
+            in_line_comment = True
+            i += 1
+            continue
+
+        # Если мы внутри блочного комментария, сохраняем только \n
+        if nesting > 0:
+            if text[i] == '\n':
+                result.append('\n')
+        else:
+            # Если не в комментарии — пишем обычный текст
+            result.append(text[i])
+
+        i += 1
+
+    return "".join(result)
+
 class Loc: 
     def __init__(self, id, name, desc, line):
         self.id = id            # номер локации (для puml)
@@ -49,7 +105,7 @@ class Loc:
         self.non_end = False    # не может быть концовкой если на нее ссылается proc, local или menu
         self.tech = False       # техническая локация
         self.orphan = False     # локация-сиротка (недостижима от старта, не может быть технической)
-        self.links = []         # [(target_id, target_name, type, label, is_phantom, is_menu, is_local)]
+        self.links = []         #[(target_id, target_name, type, label, is_phantom, is_menu, is_local)]
         self.vars = set()       # переменные
         self.invs = set()       # предметы инвентаря
         self.is_proc_target = False       # локация, в которую приходит прок ссылка
@@ -58,7 +114,7 @@ class Loc:
         return f"Loc(id={self.id}, name='{self.name}', line={self.line}, links={len(self.links)}, flags={self._get_flags()})"    
 
     def _get_flags(self):
-        flags = []
+        flags =[]
         if self.dup: flags.append('dup')
         if self.cycle: flags.append('cycle')
         if self.end: flags.append('end')
@@ -68,15 +124,18 @@ class Loc:
 
 class UrqParser:
     def __init__(self):
-        self.warnings = []
+        self.warnings =[]
     
     def parse_file(self, file_path):
         """Парсит URQ файл и возвращает структуру"""        
         orig_content = self._read_file(file_path)
         if not orig_content:
-            return []
+            return[]
         
-        # Собираем все инклюды в кучу
+        # Честно чистим главный файл от комментариев с учетом вложенности!
+        orig_content = remove_urq_comments(orig_content)
+        
+        # Собираем все инклюды (теперь закомментированные %include будут проигнорированы)
         orig_content = self._proc_includes(orig_content, os.path.dirname(os.path.abspath(file_path)))
         clean_content = self._prep_content(orig_content)
         
@@ -88,7 +147,7 @@ class UrqParser:
         
         if not locs:
             self._add_warning(f"В файле {os.path.basename(file_path)} не найдено ни одной метки")
-            return []
+            return[]
         
         # Анализируем содержимое локаций
         self._analyze_locations(locs, clean_content)
@@ -117,7 +176,7 @@ class UrqParser:
         result_parts = [clean_cont]; total_lines = clean_cont.count('\n') + 1
         
         for m in inc_pat.finditer(cont):
-            path = COMMENTS_REMOVAL.sub('', m.group(1)).strip()
+            path = m.group(1).strip()
             
             if not path or path[0] in '/\\' or ':' in path:
                 self._add_warning(f"Плохой путь: {path}"); continue
@@ -128,6 +187,10 @@ class UrqParser:
             inc = self._read_file(full)
             if inc:
                 done.add(full); fname = os.path.basename(full)
+                
+                # Чистим инклюд от вложенных комментариев СРАЗУ ПОСЛЕ ЧТЕНИЯ!
+                inc = remove_urq_comments(inc)
+                
                 inc = self._proc_includes(inc, root_base, done, root_base)
                 inc_lines = inc.count('\n') + 1; total_lines += inc_lines
                 result_parts.append('\n' + inc)
@@ -141,18 +204,19 @@ class UrqParser:
         """Парсит URQ строку и возвращает структуру"""
         if not qst_content_string:
             self._add_warning("Входная строка QST пуста.")
-            return []
+            return[]
 
         # _prep_content ожидает строку, поэтому передаем напрямую
-        clean_content = self._prep_content(qst_content_string)
+        orig_content = remove_urq_comments(qst_content_string)
+        clean_content = self._prep_content(orig_content)
         
         # _get_locations ожидает оригинальный и очищенный контент
         # Для parse_string оригинальный контент это сама входная строка
-        locs = self._get_locations(qst_content_string, clean_content)
+        locs = self._get_locations(orig_content, clean_content)
         
         if not locs:
             self._add_warning("В предоставленной строке QST не найдено ни одной метки.")
-            return []
+            return[]
         
         # Анализируем содержимое локаций
         self._analyze_locations(locs, clean_content)
@@ -164,26 +228,25 @@ class UrqParser:
         # Этап 1: Находим все локации в очищенном контенте (для логики)
         clean_matches = list(LOC_PATTERN.finditer(clean_content))
         if not clean_matches:
-            return []
+            return[]
         
         # Этап 2: Собираем потенциальные :метки из оригинала (для точных номеров строк)
-        orig_pots = []  # raw=имя_после_двоеточия, line=номер_строки
+        orig_pots =[]  # raw=имя_после_двоеточия, line=номер_строки
         orig_lines = orig_content.split('\n')
         
         for line_num, line in enumerate(orig_lines, 1):
             # Ищем все :метка в каждой строке (не используем LOC_PATTERN - он для начала строки)
             for m in COLON_PATTERN.finditer(line):
-                # raw_name = то что после :, убираем блочные /* */ комменты  
-                raw_name = re.sub(r'/\*.*?\*/', '', m.group(1), flags=re.DOTALL).strip()
-                # Добавляем даже если raw_name пустой, но есть что-то после очистки строчных ;
-                if raw_name or self._strip_line_comments(m.group(1).strip()):
+                # Нам больше не нужны хитрые очистки от комментариев, они уже вырезаны!
+                raw_name = m.group(1).strip()
+                if raw_name:
                     orig_pots.append({
-                        "raw": raw_name,        # имя метки (блочные комменты убраны)
+                        "raw": raw_name,        # имя метки
                         "line": line_num        # реальный номер строки
                     })
         
         # Этап 3: Сопоставляем clean_matches с orig_pots последовательно
-        locs = []
+        locs =[]
         name_idx = {}       # для поиска дубликатов
         orig_idx = 0        # текущий индекс в orig_pots
         
@@ -194,17 +257,15 @@ class UrqParser:
             # Ищем соответствующую метку в оригинале (последовательно)
             while orig_idx < len(orig_pots):
                 pot = orig_pots[orig_idx]
-                # Полностью очищаем имя из оригинала (блочные и строчные комменты)
-                orig_clean = self._strip_line_comments(pot["raw"])
+                orig_clean = pot["raw"]
                 
-                if orig_clean:  # пропускаем пустые после очистки
-                    # Правила сопоставления:
-                    # A) Точное совпадение: clean_name == orig_clean
-                    # B) Префикс: clean_name начинается с orig_clean (для склеенных &)
-                    if clean_name == orig_clean or clean_name.startswith(orig_clean):
-                        real_line = pot["line"]
-                        orig_idx += 1  # переходим к следующей потенциальной метке
-                        break
+                # Правила сопоставления:
+                # A) Точное совпадение: clean_name == orig_clean
+                # B) Префикс: clean_name начинается с orig_clean (для склеенных &)
+                if clean_name == orig_clean or clean_name.startswith(orig_clean):
+                    real_line = pot["line"]
+                    orig_idx += 1  # переходим к следующей потенциальной метке
+                    break
                 
                 orig_idx += 1
                 # Защита от выхода за границы
@@ -235,11 +296,6 @@ class UrqParser:
             locs.append(loc)
         
         return locs
-
-    def _strip_line_comments(self, text):
-        """Убирает комментарии ; из текста"""
-        semi_pos = text.find(';')
-        return text[:semi_pos].strip() if semi_pos != -1 else text.strip()
 
     def _analyze_locations(self, locs, clean_content):
         """Анализирует содержимое локаций и извлекает связи"""
@@ -351,7 +407,7 @@ class UrqParser:
        id_to_loc = {l.id: l for l in locs}
        
        for loc in locs:
-           res_links = []
+           res_links =[]
            for link in loc.links:
                t_id = link[LINK_TARGET_ID]
                t_name = link[LINK_TARGET_NAME] 
@@ -399,6 +455,7 @@ class UrqParser:
        
        # Находим сиротки
        self._mark_orphans(locs)
+
     def _mark_orphans(self, locs):
         """Помечает локации-сиротки"""
         if not locs:
@@ -408,7 +465,7 @@ class UrqParser:
         graph = {}  # id -> [target_ids]
         
         for loc in locs:
-            graph[loc.id] = []
+            graph[loc.id] =[]
             for link in loc.links:
                 t_id = link[LINK_TARGET_ID]  # target_id
                 if t_id:
@@ -434,7 +491,7 @@ class UrqParser:
         
         while queue:
             current = queue.popleft()
-            for target_id in graph.get(current, []):
+            for target_id in graph.get(current,[]):
                 if target_id not in reachable:
                     reachable.add(target_id)
                     queue.append(target_id)
@@ -447,13 +504,13 @@ class UrqParser:
 
     def _prep_content(self, content):
         """Предобработка контента"""
-        content = COMMENTS_REMOVAL.sub('', content)        
+        # Удалена регулярка COMMENTS_REMOVAL.sub, так как очистка уже сделана
         content = re.sub(r'\n\s*_', '', content)
 
         # меняем кавычки "" на '' - исключительно для puml!
         content = re.sub(r'"', '\'', content)
         
-        lines = []
+        lines =[]
         for line_text in content.split('\n'):
             if re.match(r'^\s*if\b', line_text, re.I):
                 parts = re.split(r'\b(then|else)\b', line_text, flags=re.I)
@@ -478,7 +535,7 @@ class UrqParser:
 
     def _extract_description(self, l_cont):
         """Извлекает описание из контента"""
-        parts = [self._process_text_with_buttons(m.group(2).strip()).strip() 
+        parts =[self._process_text_with_buttons(m.group(2).strip()).strip() 
                  for m in TEXT_EXTRACTION.finditer(l_cont)]
         return self._clean_final_text(' '.join(parts)) if parts else "Нет описания"       
     

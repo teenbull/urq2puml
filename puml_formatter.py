@@ -102,6 +102,68 @@ class PumlFormatter:
         """Проверяет валидность объекта локации"""
         return hasattr(loc, 'id') and hasattr(loc, 'name')
 
+    def _get_legend(self):
+        """Возвращает визуальную легенду-пример с правильными типами линий"""
+        return f"""skinparam legendBackgroundColor #FFFFFF
+skinparam legendBorderColor #CCCCCC
+legend top left
+**Легенда:**
+{{{{
+  hide empty description
+  skinparam BackgroundColor transparent
+  skinparam stateArrowColor {ARROW_COLOR}
+  skinparam state {{
+    BackgroundColor {STATE_BG_COLOR}
+    BorderColor {BORDER_COLOR}
+    FontColor {FONT_COLOR}
+    ArrowFontColor {ARROW_FONT_COLOR}
+  }}
+  skinparam state<<proc_target>> {{
+    BackgroundColor {PROC_TARGET_COLOR}
+    BorderColor #9370DB
+  }}
+  skinparam state<<tech>> {{
+    BackgroundColor {TECH_COLOR}
+  }}
+  skinparam state<<orphan>> {{
+    BackgroundColor {ORPHAN_COLOR}
+  }}
+  skinparam state<<group>> {{
+    BackgroundColor {GROUP_TITLE_COLOR}
+    FontColor {GROUP_FONT_COLOR}
+  }}
+  sprite $menu_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8.2 11.2"><path d="M0 0v11.2l3-2.9.1-.1h5.1L0 0z" fill="#3D3D3D"/></svg>
+  sprite $local_icon <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 12"><path d="M1.2 0 C0.4 0 0 0.4 0 1.2 L0 12 L4 9 L8 12 L8 1.2 C8 0.4 7.6 0 6.8 0 Z" fill="#CD5C5C" /></svg>
+
+  state "Техническая (start, use, inv)" as L_Tech <<tech>>
+  
+  state "Группа (префикс_)" as G1 <<group>> {{
+      state "Обычная локация" as L_Norm
+      state "Цель proc" as L_Proc <<proc_target>>
+  }}
+  
+  state "Локация-меню" as L_Menu
+  state "Концовка" as L_End {END_COLOR}
+  state "Сиротка / Фантом" as L_Bad <<orphan>>
+  state "Зацикленная" as L_Cycle {CYCLE_COLOR}
+
+  [*] --> L_Tech
+  
+  L_Tech -[dotted]-> L_Norm : переход (авто)
+  L_Tech --> L_Cycle : [goto]
+  
+  L_Tech -[{BTN_MENU_COLOR}]-> L_Menu : меню (%) <$menu_icon>
+  L_Tech -[{BTN_LOCAL_COLOR}]-> L_End : локальная (!) <$local_icon>
+  L_Tech -[{PHANTOM_ARROW_COLOR},dashed]-> L_Bad : битая ссылка
+  
+  L_Norm --> L_Proc : [proc]
+  L_Proc -[dotted]-> L_Norm : возврат
+  
+  L_Cycle --> L_Cycle : цикл
+}}}}
+endlegend
+"""
+
     def format_puml(self, locs):
         """Формирует содержимое PUML файла"""
         has_phantom = any(link[4] for loc in locs for link in loc.links if len(link) > 4)
@@ -122,6 +184,12 @@ class PumlFormatter:
         
         # Финальная сборка
         final_parts = ["@startuml\n"]
+
+        # добавляем легенду
+        if getattr(self.options, 'show_legend', True):
+            final_parts.append(self._get_legend())
+
+
         if has_phantom:
             final_parts.append(PHANTOM_NODE)
         final_parts.append(SKIN_PARAMS)

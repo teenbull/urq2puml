@@ -15,13 +15,12 @@ import importlib
 import threading
 import time
 
-modules_to_reload = [
-    'URQ2PUML.urq_parser',
-    'URQ2PUML.puml_gen', 
-    'URQ2PUML.stats',
-    'URQ2PUML.urq_fixer',
-    'URQ2PUML.encoding', 
-]
+base = __package__
+if base:
+    modules_to_reload =[
+        f'{base}.urq_parser', f'{base}.puml_gen', 
+        f'{base}.stats', f'{base}.urq_fixer', f'{base}.encoding'
+    ]
 
 for module_name in modules_to_reload:
     if module_name in sys.modules:

@@ -23,7 +23,8 @@ def detect_encoding(f_path, warnings_callback=None):
         
     try:
         with open(f_path, 'rb') as f:
-            sample = f.read(ENCODING_BUFFER_SIZE)
+            # sample = f.read(ENCODING_BUFFER_SIZE)
+            sample = f.read() # читаем файл целиком, не жалеем
             
         if warnings_callback:
             warnings_callback(f"Обнаружен файл {os.path.basename(f_path)}")
